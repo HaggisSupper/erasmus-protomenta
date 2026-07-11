@@ -43,7 +43,8 @@ def consolidate(store: Store) -> dict[str, int]:
         for row in rows:
             if row["kind"] == "correction":
                 store.db.execute(
-                    "INSERT INTO experience_candidates(lesson) VALUES(?)",
+                    "INSERT INTO experience_candidates(lesson, created_at)"
+                    " VALUES(?, CURRENT_TIMESTAMP)",
                     (row["payload"],),
                 )
                 new_candidates += 1

@@ -101,7 +101,20 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE checkpoints ADD COLUMN pending_leap             TEXT;
         ALTER TABLE checkpoints ADD COLUMN relevant_tangible_wrongness TEXT;
         ALTER TABLE checkpoints ADD COLUMN source_event_ids         TEXT NOT NULL DEFAULT '[]';
-        ALTER TABLE experience_candidates ADD COLUMN created_at TEXT NOT NULL DEFAULT ''
+        ALTER TABLE experience_candidates ADD COLUMN created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        """,
+    ),
+    (
+        3,
+        # Repair any experience_candidates rows that received an empty
+        # created_at string from a pre-fix migration 2 DEFAULT ''.
+        # Also back-fills sessions.ended_at semantics: rows that were
+        # active before migration 3 but have no ended_at are left as-is
+        # so interrupted_sessions() can detect them.
+        """
+        UPDATE experience_candidates
+        SET created_at = CURRENT_TIMESTAMP
+        WHERE created_at IS NULL OR created_at = ''
         """,
     ),
 ]

@@ -45,6 +45,49 @@ class Store:
             )
         return int(cur.lastrowid)
 
+    def start_session(self) -> int:
+        """Open a new session record and return its id.
+
+        Records the wall-clock start time.  Call :meth:`end_session` when the
+        process exits cleanly; sessions whose ``ended_at`` is NULL represent
+        interrupted runs and can be detected on the next startup.
+        """
+        with self.db:
+            cur = self.db.execute(
+                "INSERT INTO sessions(status) VALUES('active')"
+            )
+        return int(cur.lastrowid)
+
+    def end_session(self, session_id: int) -> None:
+        """Mark *session_id* as ended and record the wall-clock finish time.
+
+        Raises:
+            ValueError: If *session_id* does not exist in the sessions table.
+        """
+        with self.db:
+            rowcount = self.db.execute(
+                """
+                UPDATE sessions
+                SET    status   = 'ended',
+                       ended_at = CURRENT_TIMESTAMP
+                WHERE  id = ?
+                """,
+                (session_id,),
+            ).rowcount
+        if rowcount == 0:
+            raise ValueError(f"session {session_id!r} not found")
+
+    def interrupted_sessions(self) -> list[int]:
+        """Return ids of sessions that were never cleanly ended.
+
+        These are rows where ``ended_at IS NULL`` and ``status = 'active'``.
+        Used on startup to detect prior unclean termination.
+        """
+        rows = self.db.execute(
+            "SELECT id FROM sessions WHERE status = 'active' AND ended_at IS NULL"
+        ).fetchall()
+        return [row["id"] for row in rows]
+
     def integrity_check(self) -> list[str]:
         """Run SQLite's built-in integrity check and return the result lines.
 

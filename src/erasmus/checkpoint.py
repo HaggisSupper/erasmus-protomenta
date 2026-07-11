@@ -78,7 +78,7 @@ class Checkpoint:
     source_event_ids: list[int] = field(default_factory=list)
 
 
-def _validate(cp: Checkpoint) -> None:
+def _validate(cp: "Checkpoint", store: "Store") -> None:
     """Raise :exc:`ValueError` for any invalid checkpoint field."""
     for field_name in _REQUIRED_TEXT_FIELDS:
         value = getattr(cp, field_name)
@@ -94,6 +94,25 @@ def _validate(cp: Checkpoint) -> None:
             "source_event_ids must be a list of integers; "
             f"got {cp.source_event_ids!r}"
         )
+    if not cp.source_event_ids:
+        raise ValueError(
+            "source_event_ids must reference at least one event; "
+            "provide the ids of the events this checkpoint synthesises"
+        )
+    # Validate that every referenced event actually exists in the store.
+    placeholders = ",".join("?" * len(cp.source_event_ids))
+    found = {
+        row["id"]
+        for row in store.db.execute(
+            f"SELECT id FROM events WHERE id IN ({placeholders})",  # noqa: S608
+            cp.source_event_ids,
+        ).fetchall()
+    }
+    missing = set(cp.source_event_ids) - found
+    if missing:
+        raise ValueError(
+            f"source_event_ids references event ids that do not exist: {sorted(missing)}"
+        )
 
 
 def save_checkpoint(store: "Store", cp: Checkpoint) -> int:
@@ -104,7 +123,7 @@ def save_checkpoint(store: "Store", cp: Checkpoint) -> int:
     Raises:
         ValueError: If any required field is empty or of the wrong type.
     """
-    _validate(cp)
+    _validate(cp, store)
     with store.db:
         cur = store.db.execute(
             """

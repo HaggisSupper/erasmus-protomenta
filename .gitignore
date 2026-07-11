@@ -1,1 +1,9 @@
-# temp
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+state/*.db
+state/*.db-*
+.env
+dist/
+build/

@@ -24,7 +24,7 @@
     "contract_version": {"const": "1.0.0"},
     "mission_id": {"type": "string", "minLength": 1},
     "issue_number": {"type": "integer", "minimum": 1},
-    "role": {"enum": ["governor", "implementer", "reviewer", "verifier"]},
+    "role": {"enum": ["governor", "implementer", "reviewer", "verifier", "final_authority"]},
     "agent": {"type": "string", "minLength": 1},
     "branch": {"type": "string", "minLength": 1},
     "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},

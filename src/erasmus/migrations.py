@@ -101,7 +101,7 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE checkpoints ADD COLUMN pending_leap             TEXT;
         ALTER TABLE checkpoints ADD COLUMN relevant_tangible_wrongness TEXT;
         ALTER TABLE checkpoints ADD COLUMN source_event_ids         TEXT NOT NULL DEFAULT '[]';
-        ALTER TABLE experience_candidates ADD COLUMN created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ALTER TABLE experience_candidates ADD COLUMN created_at TEXT NOT NULL DEFAULT ''
         """,
     ),
     (

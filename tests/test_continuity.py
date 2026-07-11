@@ -15,7 +15,6 @@ Coverage:
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
@@ -191,6 +190,111 @@ class TestMigrations:
             "SELECT COUNT(*) FROM schema_version"
         ).fetchone()[0]
         assert count == 3  # exactly three migrations recorded
+
+    def test_real_premission01_upgrade(self, tmp_path):
+        """Upgrade from a genuine pre-Mission-01 database with existing data.
+
+        Constructs a real pre-Mission-01 database (migration 1 schema, no
+        created_at on experience_candidates), runs the full migration sequence,
+        and proves: migration success, timestamp population, schema-version
+        auditability, reopen success, and idempotent re-run.
+        """
+        db_path = str(tmp_path / "premission01.db")
+
+        # Build a genuine pre-Mission-01 database: migration-1 schema only,
+        # with an existing experience_candidates row that has no created_at column.
+        db = sqlite3.connect(db_path)
+        db.executescript(
+            """
+            PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS schema_version(
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS events(
+                id INTEGER PRIMARY KEY,
+                ts TEXT DEFAULT CURRENT_TIMESTAMP,
+                kind TEXT NOT NULL,
+                payload TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS propositions(
+                id INTEGER PRIMARY KEY,
+                statement TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.5,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS missions(
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                objective TEXT NOT NULL,
+                success_condition TEXT NOT NULL,
+                risk REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'proposed',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS experience_candidates(
+                id INTEGER PRIMARY KEY,
+                lesson TEXT NOT NULL,
+                evidence_count INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'candidate'
+            );
+            CREATE TABLE IF NOT EXISTS immune_state(
+                id INTEGER PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                signature TEXT NOT NULL,
+                state_json TEXT NOT NULL,
+                wake_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'sleeping',
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS checkpoints(
+                id INTEGER PRIMARY KEY,
+                frontier TEXT NOT NULL,
+                next_move TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO schema_version(version) VALUES(1);
+            INSERT INTO experience_candidates(lesson) VALUES('pre-mission lesson');
+            """
+        )
+        db.commit()
+        db.close()
+
+        # Apply migrations via Store — must not raise.
+        store = Store(db_path)
+        store.init()
+
+        # Schema-version auditability: all three versions recorded exactly once.
+        rows = store.db.execute(
+            "SELECT version, applied_at FROM schema_version ORDER BY version"
+        ).fetchall()
+        versions = [r[0] for r in rows]
+        assert versions == [1, 2, 3]
+        for r in rows:
+            assert r[1]  # applied_at provenance timestamp present
+
+        # Timestamp population: the pre-existing row must have a non-empty created_at.
+        row = store.db.execute(
+            "SELECT created_at FROM experience_candidates"
+            " WHERE lesson = 'pre-mission lesson'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] not in ("", None)
+
+        store.db.close()
+
+        # Reopen success: second Store init must not raise or duplicate rows.
+        store2 = Store(db_path)
+        store2.init()
+        count = store2.db.execute(
+            "SELECT COUNT(*) FROM schema_version"
+        ).fetchone()[0]
+        assert count == 3  # still exactly three, not six
+
+        # Idempotent re-run: applying migrations again must return empty list.
+        applied = apply_migrations(store2.db)
+        assert applied == []
 
 
 # ---------------------------------------------------------------------------

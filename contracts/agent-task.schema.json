@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/HaggisSupper/erasmus-protomenta/contracts/agent-task.schema.json",
+  "title": "Erasmus Agent Task",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "mission_id",
+    "issue_number",
+    "role",
+    "agent",
+    "branch",
+    "base_sha",
+    "head_sha",
+    "authority",
+    "allowed_paths",
+    "prohibited_actions",
+    "required_evidence",
+    "rollback",
+    "tenth_man_countercase"
+  ],
+  "properties": {
+    "contract_version": {"const": "1.0.0"},
+    "mission_id": {"type": "string", "minLength": 1},
+    "issue_number": {"type": "integer", "minimum": 1},
+    "role": {"enum": ["governor", "implementer", "reviewer", "verifier"]},
+    "agent": {"type": "string", "minLength": 1},
+    "branch": {"type": "string", "minLength": 1},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read", "write", "review", "merge"],
+      "properties": {
+        "read": {"type": "boolean"},
+        "write": {"type": "boolean"},
+        "review": {"type": "boolean"},
+        "merge": {"type": "boolean"}
+      }
+    },
+    "allowed_paths": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "prohibited_actions": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "required_evidence": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["procedure", "verified"],
+      "properties": {
+        "procedure": {"type": "string", "minLength": 1},
+        "verified": {"type": "boolean"}
+      }
+    },
+    "tenth_man_countercase": {"type": "string", "minLength": 1},
+    "human_approval_required": {"type": "boolean", "default": false},
+    "expires_at": {"type": ["string", "null"], "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"role": {"const": "reviewer"}}},
+      "then": {
+        "properties": {
+          "authority": {
+            "properties": {
+              "write": {"const": false},
+              "merge": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"role": {"const": "implementer"}}},
+      "then": {
+        "properties": {
+          "authority": {
+            "properties": {
+              "merge": {"const": false}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

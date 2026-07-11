@@ -1,6 +1,6 @@
 # Architecture
 
-The system is personal-first: Scott and Erasmus are the initial dyad. Contracts avoid hard-coding this dyad into the machinery so future isolated dyads remain possible.
+The system is personal-first: the Protomentat and Erasmus are the initial dyad. Contracts avoid hard-coding this dyad into the machinery so future isolated dyads remain possible.
 
 ## Planes
 

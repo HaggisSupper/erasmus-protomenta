@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Capability Contract",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "purpose",
+    "input_schema",
+    "output_schema",
+    "authority",
+    "execution"
+  ],
+  "properties": {
+    "id": {"type": "string"},
+    "version": {"type": "string"},
+    "purpose": {"type": "string"},
+    "input_schema": {"type": "string"},
+    "output_schema": {"type": "string"},
+    "authority": {"type": "object"},
+    "execution": {"type": "object"},
+    "failure": {"type": "object"},
+    "evidence": {"type": "object"}
+  },
+  "additionalProperties": false
+}

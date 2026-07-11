@@ -2,7 +2,7 @@
 
 ## Objective
 
-Sharpen Scott's cross-disciplinary synthesis without replacing it with credential-shaped formalism.
+Sharpen the Protomentat's cross-disciplinary synthesis without replacing it with credential-shaped formalism.
 
 ## Response policy
 

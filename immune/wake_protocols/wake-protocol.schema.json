@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Dormant Immune Agent Wake Protocol",
+  "type": "object",
+  "required": [
+    "agent_id",
+    "wake_when",
+    "wake_with",
+    "allowed_actions",
+    "forbidden_actions",
+    "sleep_when"
+  ],
+  "properties": {
+    "agent_id": {"type": "string"},
+    "wake_when": {"type": "array", "items": {"type": "object"}},
+    "wake_with": {"type": "array", "items": {"type": "string"}},
+    "allowed_actions": {"type": "array", "items": {"type": "string"}},
+    "forbidden_actions": {"type": "array", "items": {"type": "string"}},
+    "sleep_when": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

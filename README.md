@@ -1,6 +1,6 @@
 # Erasmus–Protomentat
 
-A personal, persistent cognitive system for Scott and Erasmus.
+A personal-first, persistent cognitive system for a human–AI partnership.
 
 The system combines bounded conversational continuity, deterministic-first capabilities, an epistemic ledger, sleep consolidation, mission execution, and a 10th-Man cognitive immune system.
 
@@ -24,3 +24,5 @@ The system combines bounded conversational continuity, deterministic-first capab
 ## Status
 
 This repository is an implementable experimental kernel. It is personal-first but contract-shaped so it can later evolve into isolated dyadic deployments.
+
+See `docs/DEVELOPMENT_TRACK.md` for the locked phased architecture and scope boundaries.

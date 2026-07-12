@@ -1,0 +1,41 @@
+{
+  "contract_version": "1.0.0",
+  "mission_id": "mission-17-governance-control-plane",
+  "issue_number": 17,
+  "role": "implementer",
+  "agent": "copilot/haggissupper-enforce-governance-control-plane",
+  "branch": "copilot/haggissupper-enforce-governance-control-plane",
+  "base_sha": "0000000000000000000000000000000000000001",
+  "head_sha": "0000000000000000000000000000000000000002",
+  "authority": {
+    "read": true,
+    "write": true,
+    "review": false,
+    "merge": false
+  },
+  "allowed_paths": [
+    "src/erasmus/",
+    "tests/",
+    "contracts/",
+    "scripts/",
+    ".github/workflows/"
+  ],
+  "prohibited_actions": [
+    "weaken_immutable_contract",
+    "treat_model_consensus_as_evidence",
+    "merge_own_work",
+    "approve_own_work"
+  ],
+  "required_evidence": [
+    "ci_green: all tests pass on ubuntu-latest and windows-latest",
+    "test_result: 56 existing tests pass, new governance tests pass",
+    "review_result: independent reviewer approved at head_sha",
+    "rollback_declaration: revert enforcement commits; contracts remain version-controlled"
+  ],
+  "rollback": {
+    "procedure": "git revert the enforcement commits; governance contracts remain version-controlled and no persistent migration is required",
+    "verified": true
+  },
+  "tenth_man_countercase": "Automating policy checks can create ceremonial compliance while still validating an incomplete mission or weak evidence. The validator must report what it can and cannot prove, preserve human escalation, and never treat schema validity as mission correctness.",
+  "human_approval_required": false
+}

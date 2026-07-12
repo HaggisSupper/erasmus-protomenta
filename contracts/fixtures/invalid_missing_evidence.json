@@ -1,0 +1,31 @@
+{
+  "contract_version": "1.0.0",
+  "mission_id": "mission-17-governance-control-plane",
+  "issue_number": 17,
+  "role": "implementer",
+  "agent": "copilot/implementer-agent",
+  "branch": "copilot/haggissupper-enforce-governance-control-plane",
+  "base_sha": "0000000000000000000000000000000000000001",
+  "head_sha": "0000000000000000000000000000000000000002",
+  "authority": {
+    "read": true,
+    "write": true,
+    "review": false,
+    "merge": false
+  },
+  "allowed_paths": [
+    "src/erasmus/"
+  ],
+  "prohibited_actions": [
+    "merge_own_work"
+  ],
+  "required_evidence": [
+    "scope_respected: changes within allowed_paths"
+  ],
+  "rollback": {
+    "procedure": "revert commits",
+    "verified": true
+  },
+  "tenth_man_countercase": "Evidence is missing CI, review, and rollback entries.",
+  "human_approval_required": false
+}

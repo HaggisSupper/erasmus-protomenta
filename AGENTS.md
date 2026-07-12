@@ -4,7 +4,7 @@ This file governs all coding agents working in this repository.
 
 ## Mission
 
-Build a personal, persistent cognitive system for the Erasmus–Protomentat dyad. Optimize for Scott and Erasmus first. Preserve clean contracts so isolated dyads may be supported later, but do not build a generic platform prematurely.
+Build a personal, persistent cognitive system for the Erasmus–Protomentat dyad. Optimize for the Protomentat and Erasmus first. Preserve clean contracts so isolated dyads may be supported later, but do not build a generic platform prematurely.
 
 ## Immutable rules
 

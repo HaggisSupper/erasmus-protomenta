@@ -1,7 +1,7 @@
 {
   "participant": {
     "id": "protomentat",
-    "name": "Scott"
+    "name": "Protomentat"
   },
   "runtime": {
     "base_url": "http://127.0.0.1:1234/v1",

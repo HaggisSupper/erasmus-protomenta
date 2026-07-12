@@ -15,11 +15,17 @@ The system combines bounded conversational continuity, deterministic-first capab
 
 ## Commands
 
-- `python -m erasmus.cli.main init`
-- `python -m erasmus.cli.main status`
-- `python -m erasmus.cli.main mission-create --title "..." --objective "..."`
-- `python -m erasmus.cli.main sleep`
-- `python -m erasmus.cli.main review --proposition "..."`
+- `erasmus init` — apply schema migrations and initialise the database
+- `erasmus status` — table row counts and applied schema versions
+- `erasmus mission-create --title "..." --objective "..."`
+- `erasmus sleep` — consolidate events into experience candidates (idempotent)
+- `erasmus checkpoint` — JSON-dump the latest committed checkpoint
+- `erasmus integrity` — run `PRAGMA integrity_check`
+- `erasmus backup <dest>` — hot-backup the database to a file
+- `erasmus restore <src>` — restore from a backup file
+- `erasmus review --proposition "..."`
+
+See [`docs/runbook-windows.md`](docs/runbook-windows.md) for PowerShell verification commands.
 
 ## Status
 

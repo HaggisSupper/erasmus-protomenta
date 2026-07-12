@@ -1,0 +1,91 @@
+version: 1.0.0
+mode: fail_closed
+
+roles:
+  erasmus:
+    role: governor
+    may:
+      - define_mission
+      - reconcile_reviews
+      - request_changes
+      - merge_after_all_gates
+    may_not:
+      - weaken_immutable_contract
+      - treat_model_consensus_as_evidence
+
+  worker:
+    role: implementer
+    branch_ownership: exclusive
+    may:
+      - modify_assigned_branch
+      - run_tests
+      - update_pull_request
+    may_not:
+      - approve_own_work
+      - merge_own_work
+      - write_outside_allowed_paths
+
+  reviewer:
+    role: reviewer
+    authority: advisory
+    sha_bound: true
+    may:
+      - inspect
+      - report_findings
+      - propose_countercases
+    may_not:
+      - modify_implementation_branch
+      - approve_own_implementation
+      - merge
+
+  ci:
+    role: verifier
+    deterministic_evidence: true
+    may_not:
+      - override_contract_failure
+
+  protomentat:
+    role: final_authority
+    required_for:
+      - contract_weakening
+      - destructive_migration
+      - secret_access
+      - external_publication
+      - irreversible_action
+      - unresolved_consequential_ambiguity
+
+branch_rules:
+  max_writers: 1
+  competing_implementations_require_separate_branches: true
+  handoff_requires_explicit_reassignment: true
+  stale_review_after_head_change: true
+
+merge_gates:
+  - linked_mission
+  - current_head_reviewed
+  - exclusive_branch_owner
+  - required_ci_green
+  - acceptance_criteria_met
+  - contracts_explicit
+  - migrations_and_rollback_valid
+  - scope_respected
+  - no_blocking_review
+  - tenth_man_answered
+  - no_pending_human_gate
+
+halt_triggers:
+  - authority_creep
+  - contract_weakening
+  - provenance_loss
+  - hidden_state_mutation
+  - shared_branch_writers
+  - missing_ci
+  - missing_rollback
+  - ambiguous_authority
+  - conflicting_unresolved_evidence
+
+retry_policy:
+  maximum_materially_similar_repair_cycles: 3
+  on_limit: escalate_to_protomentat
+  transient_failures_may_retry: true
+  infinite_retry: false

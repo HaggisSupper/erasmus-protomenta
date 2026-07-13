@@ -4,12 +4,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import jsonschema
 from cryptography.exceptions import InvalidSignature
@@ -48,6 +50,15 @@ def artifact_digest(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _repository_identity(url: str) -> tuple[str, str]:
+    if match := re.fullmatch(r"git@([^:]+):(.+)", url):
+        host, path = match.groups()
+    else:
+        parsed = urlparse(url)
+        host, path = parsed.hostname or "", parsed.path.lstrip("/")
+    return host.lower(), path.removesuffix(".git").rstrip("/").lower()
+
+
 def load_tool_manifest(path: str | Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -75,16 +86,22 @@ class ToolRegistry:
 
     def trust_publisher(self, key_id: str, public_key: bytes, owner: str) -> None:
         encoded = base64.b64encode(public_key).decode()
-        existing = self.db.execute(
-            "SELECT public_key FROM tool_publishers WHERE key_id=?", (key_id,)
-        ).fetchone()
-        if existing is not None and existing[0] != encoded:
-            raise PermissionError("publisher key replacement requires an explicit migration")
-        with self.db:
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            existing = self.db.execute(
+                "SELECT public_key FROM tool_publishers WHERE key_id=?", (key_id,)
+            ).fetchone()
+            if existing is not None and existing[0] != encoded:
+                raise PermissionError("publisher key replacement requires an explicit migration")
             self.db.execute(
                 "INSERT INTO tool_publishers(key_id, public_key, owner) VALUES(?, ?, ?) ON CONFLICT(key_id) DO UPDATE SET public_key=excluded.public_key, owner=excluded.owner, status='trusted'",
                 (key_id, encoded, owner),
             )
+        except Exception:
+            self.db.rollback()
+            raise
+        else:
+            self.db.commit()
 
     def register(self, manifest: dict[str, Any]) -> None:
         errors = validate_tool_manifest(manifest)
@@ -106,7 +123,7 @@ class ToolRegistry:
             ["git", "remote", "get-url", "origin"], cwd=ROOT,
             capture_output=True, text=True, check=True,
         ).stdout.strip().removesuffix(".git")
-        if remote != manifest["source"]["repository"]:
+        if _repository_identity(remote) != _repository_identity(manifest["source"]["repository"]):
             raise ValueError("source repository provenance mismatch")
         source = subprocess.run(
             ["git", "show", f"{manifest['source']['commit']}:{manifest['entrypoint']['artifact']}"],
@@ -175,24 +192,33 @@ class ToolRegistry:
             / Path(manifest["entrypoint"]["artifact"]).name
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(artifact, destination)
+        shutil.copy2(artifact, destination)
         if artifact_digest(destination) != manifest["digest"]["value"]:
             destination.unlink(missing_ok=True)
             raise ValueError("cached artifact digest mismatch")
         with self.db:
             self.db.execute(
                 "UPDATE tool_manifests SET cache_path=? WHERE tool_id=? AND version=? AND target=?",
-                (str(destination), manifest["tool_id"], manifest["version"], manifest["target"]),
+                (destination.relative_to(self.cache_root).as_posix(), manifest["tool_id"],
+                 manifest["version"], manifest["target"]),
             )
             self._audit("installed", manifest, {"cache_path": str(destination)})
         return destination
 
+    def _cached_path(self, cache_path: str) -> Path:
+        path = (self.cache_root / cache_path).resolve()
+        if not path.is_relative_to(self.cache_root):
+            raise ValueError("unsafe cache path")
+        return path
+
     def activate(self, tool_id: str, version: str, target: str) -> None:
         manifest, lifecycle, cache_path = self._manifest(tool_id, version, target)
-        if lifecycle != "verified" or cache_path is None or artifact_digest(cache_path) != manifest["digest"]["value"]:
+        if (lifecycle != "verified" or cache_path is None
+                or artifact_digest(self._cached_path(cache_path)) != manifest["digest"]["value"]):
             raise PermissionError("tool must be verified and installed before activation")
         capability_pairs = {(item["id"], item["version"]) for item in manifest["capabilities"]}
-        with self.db:
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
             active = self.db.execute(
                 "SELECT manifest_json FROM tool_manifests WHERE lifecycle='active' AND target=?",
                 (target,),
@@ -209,6 +235,11 @@ class ToolRegistry:
                 (tool_id, version, target),
             )
             self._audit("activated", manifest, {})
+        except Exception:
+            self.db.rollback()
+            raise
+        else:
+            self.db.commit()
 
     def resolve(
         self, capability_id: str, capability_version: str, target: str,
@@ -233,13 +264,22 @@ class ToolRegistry:
     ) -> subprocess.CompletedProcess[str]:
         manifest = self.resolve(capability_id, capability_version, target, authorities, side_effects)
         _, _, cache_path = self._manifest(manifest["tool_id"], manifest["version"], target)
-        if cache_path is None or artifact_digest(cache_path) != manifest["digest"]["value"]:
+        if cache_path is None or artifact_digest(self._cached_path(cache_path)) != manifest["digest"]["value"]:
             raise PermissionError("cached artifact is missing or tampered")
-        command = ([sys.executable] if manifest["entrypoint"]["runtime"] == "python" else []) + [cache_path, *args]
-        completed = subprocess.run(
-            command, cwd=cwd, capture_output=True, text=True,
-            timeout=manifest["timeout_seconds"], check=False,
-        )
+        executable = str(self._cached_path(cache_path))
+        command = ([sys.executable] if manifest["entrypoint"]["runtime"] == "python" else []) + [executable, *args]
+        try:
+            completed = subprocess.run(
+                command, cwd=cwd, capture_output=True, text=True,
+                timeout=manifest["timeout_seconds"], check=False,
+            )
+        except subprocess.TimeoutExpired:
+            with self.db:
+                self._audit("execution_timed_out", manifest, {
+                    "argument_digest": hashlib.sha256(json.dumps(args).encode()).hexdigest(),
+                    "timeout_seconds": manifest["timeout_seconds"],
+                })
+            raise
         with self.db:
             self._audit("executed", manifest, {
                 "argument_digest": hashlib.sha256(json.dumps(args).encode()).hexdigest(),
@@ -276,10 +316,7 @@ class ToolRegistry:
         if lifecycle == "active":
             raise PermissionError("deactivate or revoke before uninstall")
         if cache_path:
-            path = Path(cache_path).resolve()
-            if not path.is_relative_to(self.cache_root):
-                raise ValueError("unsafe cache path")
-            path.unlink(missing_ok=True)
+            self._cached_path(cache_path).unlink(missing_ok=True)
         with self.db:
             self.db.execute(
                 "UPDATE tool_manifests SET cache_path=NULL WHERE tool_id=? AND version=? AND target=?",
@@ -316,12 +353,16 @@ def validate_toolchain_document(path: str | Path, manifest_dir: str | Path) -> l
     errors = [f"missing section: {heading}" for heading in required if heading not in text]
     for manifest_path in sorted(Path(manifest_dir).glob("*.json")):
         manifest = load_tool_manifest(manifest_path)
+        try:
+            document_path = manifest_path.resolve().relative_to(ROOT.resolve()).as_posix()
+        except ValueError:
+            document_path = manifest_path.as_posix()
         for value in (
-            manifest_path.as_posix(), manifest["version"], manifest["digest"]["value"],
+            document_path, manifest["version"], manifest["digest"]["value"],
             manifest["source"]["commit"], manifest["signature"]["key_id"],
         ):
             if value not in text:
                 errors.append(f"TOOLCHAIN.md omits governed value: {value}")
-    if " latest " in f" {text.lower()} ":
+    if re.search(r"(?i)(?:@latest\b|\|\s*latest\s*\|)", text):
         errors.append("mutable latest identity is forbidden")
     return errors

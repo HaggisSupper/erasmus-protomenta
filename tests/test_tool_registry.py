@@ -1,6 +1,8 @@
 import base64
 import json
+import os
 import sqlite3
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
@@ -13,6 +15,7 @@ from erasmus.capability_graph import CapabilityGraph
 from erasmus.store import Store
 from erasmus.tool_registry import (
     ToolRegistry,
+    _repository_identity,
     artifact_digest,
     load_tool_manifest,
     sign_manifest,
@@ -78,7 +81,9 @@ def test_verify_install_activate_resolve_execute_and_restart(tmp_path, monkeypat
     )
     assert completed.returncode == 0
     assert json.loads(completed.stdout) == [{"value": "governed"}]
-    assert str(cached) in {item["cache_path"] for item in tool_registry.export()["tools"]}
+    assert cached.relative_to(tool_registry.cache_root).as_posix() in {
+        item["cache_path"] for item in tool_registry.export()["tools"]
+    }
 
     reopened = Store(str(tmp_path / "registry.db"))
     reopened.init()
@@ -175,3 +180,52 @@ def test_concurrent_registration_keeps_one_canonical_row(tmp_path):
         outcomes = sorted(executor.map(lambda _: register_once(), range(2)))
     assert outcomes == ["duplicate", "registered"]
     assert len(tool_registry.list()) == 1
+
+
+def test_install_preserves_permissions_and_uses_portable_cache_path(tmp_path):
+    tool_registry = registry(tmp_path)
+    manifest = load_tool_manifest(MANIFESTS / "sqlite_reader.json")
+    artifact = tmp_path / "sqlite_reader.py"
+    artifact.write_bytes(Path(manifest["entrypoint"]["artifact"]).read_bytes())
+    artifact.chmod(0o755)
+    tool_registry.register(manifest)
+    tool_registry.verify(manifest, artifact, TARGET)
+    cached = tool_registry.install(manifest, artifact)
+    if os.name != "nt":
+        assert cached.stat().st_mode & 0o111
+    assert not Path(tool_registry.list()[0]["cache_path"]).is_absolute()
+
+
+def test_timeout_is_audited_without_argument_or_output_leak(tmp_path, monkeypatch):
+    tool_registry = registry(tmp_path)
+    manifest = load_tool_manifest(MANIFESTS / "sqlite_reader.json")
+    tool_registry.register(manifest)
+    tool_registry.verify(manifest, manifest["entrypoint"]["artifact"], TARGET)
+    tool_registry.install(manifest, manifest["entrypoint"]["artifact"])
+    tool_registry.activate("sqlite_reader", "1.0.0", TARGET)
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 1)
+
+    monkeypatch.setattr("erasmus.tool_registry.subprocess.run", timeout)
+    with pytest.raises(subprocess.TimeoutExpired):
+        tool_registry.execute(
+            "query_sqlite", "1.0.0", TARGET, {"database:read"}, set(),
+            ["secret-input"], tmp_path,
+        )
+    detail = tool_registry.export()["audit"][-1]
+    assert detail["event"] == "execution_timed_out"
+    assert "secret-input" not in detail["detail_json"]
+
+
+def test_repository_and_toolchain_paths_are_normalized(tmp_path):
+    assert _repository_identity("git@github.com:HaggisSupper/erasmus-protomenta.git") == (
+        "github.com", "haggissupper/erasmus-protomenta"
+    )
+    document = tmp_path / "TOOLCHAIN.md"
+    document.write_text(Path("TOOLCHAIN.md").read_text() + "\nThe latest verified tools are listed.\n")
+    assert validate_toolchain_document(document, MANIFESTS.resolve()) == []
+    document.write_text(document.read_text() + "\nForbidden: run_tests@latest\n")
+    assert "mutable latest identity is forbidden" in validate_toolchain_document(
+        document, MANIFESTS.resolve()
+    )

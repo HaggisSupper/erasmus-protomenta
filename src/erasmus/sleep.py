@@ -104,10 +104,10 @@ def consolidate(store: Store, *, fail_after_stage: str | None = None) -> dict[st
                 (run_id, _json({"last_event_id": new_last_id})),
             )
         counts["last_event_id"] = new_last_id
-        return counts | {"report": sleep_report(store, run_id)}
     except Exception as error:
         _fail(store, run_id, str(error))
         raise
+    return counts | {"report": sleep_report(store, run_id)}
 
 
 def decide_candidate(
@@ -249,29 +249,36 @@ def _classify(event_id: int, kind: str, raw_payload: str):
         pass
 
     if kind == "correction":
+        content = _normalize_content(raw_payload)
+        if not content:
+            return source, None, "", {}, "rejected", "candidate content is required"
         return (
-            source, "behavioral_lesson", raw_payload,
+            source, "behavioral_lesson", content,
             {"source_event_id": event_id, "source_class": source},
             "deferred", "legacy correction retained as a deferred lesson",
         )
     if payload is None:
+        content = _normalize_content(raw_payload)
+        if not content:
+            return source, None, "", {}, "rejected", "candidate content is required"
         if source in {"external", "erasmus"}:
             return (
-                source, "rag_insert", raw_payload,
+                source, "rag_insert", content,
                 {"source_event_id": event_id, "source_class": source, "trust": "untrusted"},
                 "quarantined", "external or model content defaults to quarantine",
             )
         if source == "protomentat":
             return (
-                source, "rag_insert", raw_payload,
+                source, "rag_insert", content,
                 {"source_event_id": event_id, "source_class": source},
                 "accepted", "explicit human input accepted only as memory candidate",
             )
         return source, None, "", {}, "discarded", "no typed consolidation candidate"
 
     candidate_type = payload.get("candidate_type")
-    content = payload.get("content")
-    if candidate_type not in CANDIDATE_TYPES or not isinstance(content, str) or not content.strip():
+    raw_content = payload.get("content")
+    content = _normalize_content(raw_content) if isinstance(raw_content, str) else ""
+    if candidate_type not in CANDIDATE_TYPES or not content:
         return source, None, "", {}, "rejected", "candidate type and content are required"
     provenance = {
         "source_event_id": event_id,
@@ -297,17 +304,21 @@ def _classify(event_id: int, kind: str, raw_payload: str):
 
 
 def _conflict(store: Store, event_id: int, candidate_type: str, content: str) -> str | None:
-    if candidate_type == "proposition_change" and store.db.execute(
-        "SELECT 1 FROM propositions WHERE statement = ?", (content,)
-    ).fetchone():
-        return "current ledger already contains this proposition"
-    if store.db.execute(
+    normalized = _normalize_content(content)
+    if candidate_type == "proposition_change":
+        statements = store.db.execute("SELECT statement FROM propositions").fetchall()
+        if any(_normalize_content(row["statement"]) == normalized for row in statements):
+            return "current ledger already contains this proposition"
+    prior = store.db.execute(
         """
-        SELECT 1 FROM sleep_candidates
-        WHERE event_id != ? AND candidate_type = ? AND content = ?
+        SELECT c.content FROM sleep_candidates c
+        JOIN sleep_items i ON i.event_id = c.event_id
+        WHERE c.event_id != ? AND c.candidate_type = ?
+          AND i.disposition IN ('accepted', 'deferred')
         """,
-        (event_id, candidate_type, content),
-    ).fetchone():
+        (event_id, candidate_type),
+    ).fetchall()
+    if any(_normalize_content(row["content"]) == normalized for row in prior):
         return "prior consolidated material already contains this candidate"
     return None
 
@@ -338,17 +349,17 @@ def _defer_adaptations(store: Store, run_id: int) -> int:
 
 
 def _open_or_resume_run(store: Store, start_event_id: int, end_event_id: int) -> int:
-    failed = store.db.execute(
+    resumable = store.db.execute(
         """
         SELECT id FROM sleep_runs
-        WHERE status = 'failed' AND version = ? AND start_event_id = ?
+        WHERE status IN ('failed', 'running') AND version = ? AND start_event_id = ?
         ORDER BY id DESC LIMIT 1
         """,
         (VERSION, start_event_id),
     ).fetchone()
     with store.db:
-        if failed is not None:
-            run_id = int(failed["id"])
+        if resumable is not None:
+            run_id = int(resumable["id"])
             store.db.execute(
                 """
                 UPDATE sleep_runs SET status = 'running', current_stage = 'quarantine',
@@ -410,3 +421,7 @@ def _last_event_id(store: Store) -> int:
 
 def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _normalize_content(content: str) -> str:
+    return " ".join(content.split())

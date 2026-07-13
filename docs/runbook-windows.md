@@ -122,7 +122,12 @@ erasmus --db state\erasmus.db sleep-decide 3 approved belief 7 `
 Source events are never deleted. External and Erasmus-authored content is
 quarantined; behavioral lessons remain deferred; proposition decisions require
 ledger evidence plus `sleep:promote` authority. A failed run retains its stage
-and classified items, then safely resumes from the same run id.
+and classified items, then safely resumes from the same run id. A stale
+`running` run left by an unclean process termination also resumes. Candidate
+content is whitespace-normalized before comparison, and quarantined material
+cannot block a later trusted candidate with matching content. Report rendering
+happens after the checkpoint transaction, so a rendering error cannot turn a
+completed run into a failed one.
 
 ## Backup and restore
 

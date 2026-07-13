@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+import erasmus.sleep as sleep_module
 from erasmus.ledger import EpistemicLedger
 from erasmus.cli.main import main
 from erasmus.sleep import SleepError, consolidate, decide_candidate, sleep_report
@@ -155,6 +156,32 @@ def test_conflicts_with_ledger_and_prior_material_are_rejected(tmp_path):
     ]
 
 
+def test_quarantine_does_not_block_later_trusted_normalized_candidate(tmp_path):
+    store = _store(tmp_path)
+    _event(store, "erasmus_output", "proposition_change", "  reviewed   claim  ")
+    _event(store, "tool_output", "proposition_change", "reviewed claim")
+    report = consolidate(store)["report"]
+    assert [item["disposition"] for item in report["items"]] == [
+        "quarantined", "deferred"
+    ]
+    assert [item["content"] for item in report["items"]] == [
+        "reviewed claim", "reviewed claim"
+    ]
+
+
+def test_normalization_detects_duplicates_and_rejects_whitespace_only(tmp_path):
+    store = _store(tmp_path)
+    _event(store, "tool_output", "proposition_change", "same\n claim")
+    _event(store, "tool_output", "proposition_change", " same   claim ")
+    _event(store, "tool_output", "proposition_change", " \t\n ")
+    report = consolidate(store)["report"]
+    assert [item["disposition"] for item in report["items"]] == [
+        "deferred", "rejected", "rejected"
+    ]
+    assert report["items"][0]["content"] == "same claim"
+    assert report["items"][2]["candidate_id"] is None
+
+
 def test_failure_after_reconciliation_resumes_same_run_without_duplicates(tmp_path):
     path = str(tmp_path / "recovery.db")
     first = Store(path)
@@ -177,6 +204,46 @@ def test_failure_after_reconciliation_resumes_same_run_without_duplicates(tmp_pa
     assert reopened.db.execute("SELECT COUNT(*) FROM sleep_candidates").fetchone()[0] == 1
     assert reopened.db.execute("SELECT COUNT(*) FROM experience_candidates").fetchone()[0] == 1
     assert result["report"]["run"]["status"] == "completed"
+
+
+def test_unclean_running_run_resumes_without_loss(tmp_path, monkeypatch):
+    path = str(tmp_path / "unclean.db")
+    first = Store(path)
+    first.init()
+    first.add_event("correction", "crash-safe lesson")
+    monkeypatch.setattr(sleep_module, "_fail", lambda *_args: None)
+    with pytest.raises(SleepError, match="injected failure"):
+        consolidate(first, fail_after_stage="reconcile")
+    run = first.db.execute("SELECT * FROM sleep_runs").fetchone()
+    assert run["status"] == "running"
+    first.db.close()
+    monkeypatch.undo()
+
+    reopened = Store(path)
+    reopened.init()
+    result = consolidate(reopened)
+    assert result["run_id"] == run["id"]
+    assert result["report"]["run"]["status"] == "completed"
+    assert reopened.db.execute("SELECT COUNT(*) FROM sleep_items").fetchone()[0] == 1
+    assert reopened.db.execute("SELECT COUNT(*) FROM sleep_candidates").fetchone()[0] == 1
+    assert reopened.db.execute("SELECT COUNT(*) FROM experience_candidates").fetchone()[0] == 1
+
+
+def test_report_failure_does_not_reclassify_completed_run(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    event_id = store.add_event("correction", "durable before rendering")
+    monkeypatch.setattr(
+        sleep_module, "sleep_report",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("render failed")),
+    )
+    with pytest.raises(RuntimeError, match="render failed"):
+        consolidate(store)
+    run = store.db.execute("SELECT * FROM sleep_runs").fetchone()
+    assert run["status"] == "completed"
+    assert run["current_stage"] == "checkpoint"
+    assert store.db.execute(
+        "SELECT last_event_id FROM sleep_progress WHERE id = 1"
+    ).fetchone()[0] == event_id
 
 
 def test_rerun_is_idempotent_and_source_events_remain(tmp_path):

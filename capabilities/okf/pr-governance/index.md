@@ -12,6 +12,7 @@
 * [Validate JSON Schema](validate_json_schema.md) - Validate JSON values deterministically.
 * [Hash content](hash_content.md) - Hash text or files inside configured roots.
 * [Query SQLite FTS](query_sqlite_fts.md) - Run bounded read-only full-text queries.
+* [Detect divergence with k-NN](detect_divergence_knn.md) - Score an optional interpretable classical anomaly detector.
 * [Invoke 10th-Man review](invoke_tenth_man_review.md) - Produce an independent countercase.
 * [Request human approval](request_human_approval.md) - Obtain consequential approval.
 * [Merge pull request](merge_pull_request.md) - Merge only after all governance evidence passes.

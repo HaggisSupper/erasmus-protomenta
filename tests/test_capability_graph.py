@@ -38,7 +38,7 @@ def test_starter_schema_and_round_trip(tmp_path):
     assert validate_manifest(manifest) == []
     capability_graph = graph(tmp_path)
     assert capability_graph.export_manifest() == manifest
-    assert len(capability_graph.list_capabilities()) == 11
+    assert len(capability_graph.list_capabilities()) == 12
     assert capability_graph.inspect("merge_pull_request")["classification"] == "deterministic"
     exported = tmp_path / "exported-okf"
     capability_graph.export_bundle(exported)
@@ -298,7 +298,7 @@ def test_constraint_migrations_are_retryable_and_preserve_valid_rows():
         "INSERT INTO capability_edges VALUES('source', '1', 'requires', 'target', '1')"
     )
     db.commit()
-    assert apply_migrations(db) == [6, 7, 8, 9, 10, 11, 12, 13]
+    assert apply_migrations(db) == [6, 7, 8, 9, 10, 11, 12, 13, 14]
     assert db.execute("SELECT edge_type FROM capability_edges").fetchone() == ("requires",)
     assert db.execute("SELECT result FROM capability_evidence").fetchone() == ("success",)
     with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):

@@ -846,6 +846,72 @@ MIGRATIONS: list[tuple[int, str]] = [
         END;
         """,
     ),
+    (
+        14,
+        # Versioned, append-only divergence features, detector calibration,
+        # wake recommendations, and offline evaluation results.
+        """
+        CREATE TABLE divergence_windows(
+            id INTEGER PRIMARY KEY,
+            version TEXT NOT NULL,
+            features_json TEXT NOT NULL,
+            consequence REAL NOT NULL CHECK(consequence >= 0 AND consequence <= 1),
+            label TEXT,
+            source_refs_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE divergence_calibrations(
+            id INTEGER PRIMARY KEY,
+            detector TEXT NOT NULL,
+            version TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('deterministic', 'statistical', 'classical')),
+            threshold REAL NOT NULL CHECK(threshold > 0),
+            baseline_json TEXT NOT NULL,
+            weight REAL NOT NULL CHECK(weight > 0 AND weight <= 1),
+            reason TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE divergence_recommendations(
+            id INTEGER PRIMARY KEY,
+            window_id INTEGER NOT NULL,
+            calibration_id INTEGER,
+            detector TEXT NOT NULL,
+            score REAL NOT NULL,
+            threshold REAL NOT NULL,
+            outcome TEXT NOT NULL CHECK(outcome IN ('pass', 'wake', 'escalate')),
+            reasons_json TEXT NOT NULL,
+            contributing_features_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(window_id) REFERENCES divergence_windows(id),
+            FOREIGN KEY(calibration_id) REFERENCES divergence_calibrations(id)
+        );
+        CREATE TABLE divergence_evaluations(
+            id INTEGER PRIMARY KEY,
+            detector TEXT NOT NULL,
+            version TEXT NOT NULL,
+            fixture_count INTEGER NOT NULL,
+            metrics_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TRIGGER divergence_windows_no_update BEFORE UPDATE ON divergence_windows
+        BEGIN SELECT RAISE(ABORT, 'divergence windows are append-only'); END;
+        CREATE TRIGGER divergence_windows_no_delete BEFORE DELETE ON divergence_windows
+        BEGIN SELECT RAISE(ABORT, 'divergence windows are append-only'); END;
+        CREATE TRIGGER divergence_calibrations_no_update BEFORE UPDATE ON divergence_calibrations
+        BEGIN SELECT RAISE(ABORT, 'divergence calibrations are append-only'); END;
+        CREATE TRIGGER divergence_calibrations_no_delete BEFORE DELETE ON divergence_calibrations
+        BEGIN SELECT RAISE(ABORT, 'divergence calibrations are append-only'); END;
+        CREATE TRIGGER divergence_recommendations_no_update BEFORE UPDATE ON divergence_recommendations
+        BEGIN SELECT RAISE(ABORT, 'divergence recommendations are append-only'); END;
+        CREATE TRIGGER divergence_recommendations_no_delete BEFORE DELETE ON divergence_recommendations
+        BEGIN SELECT RAISE(ABORT, 'divergence recommendations are append-only'); END;
+        CREATE TRIGGER divergence_evaluations_no_update BEFORE UPDATE ON divergence_evaluations
+        BEGIN SELECT RAISE(ABORT, 'divergence evaluations are append-only'); END;
+        CREATE TRIGGER divergence_evaluations_no_delete BEFORE DELETE ON divergence_evaluations
+        BEGIN SELECT RAISE(ABORT, 'divergence evaluations are append-only'); END;
+        """,
+    ),
 ]
 
 

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://erasmus.local/contracts/immune-agent-v1.json",
+  "title": "Dormant cognitive immune agent contract",
+  "type": "object",
+  "required": [
+    "version", "agent_id", "specialty", "wake_detectors", "authority",
+    "allowed_outcomes", "sleep_after"
+  ],
+  "properties": {
+    "version": {"const": "1.0.0"},
+    "agent_id": {"type": "string", "minLength": 1},
+    "specialty": {
+      "enum": [
+        "mutual_reinforcement", "false_equivalence", "provenance_contamination"
+      ]
+    },
+    "wake_detectors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "authority": {
+      "type": "array",
+      "const": ["immune:inspect", "immune:recommend"]
+    },
+    "allowed_outcomes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "pass", "flag", "quarantine", "lower_confidence_recommendation",
+          "request_counterevidence", "escalate"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "sleep_after": {
+      "enum": ["monitoring", "escalated"]
+    }
+  },
+  "additionalProperties": false
+}

@@ -19,6 +19,7 @@ from erasmus.capability_runtime import (
     validate_json_schema,
 )
 from erasmus.checkpoint import load_latest_checkpoint
+from erasmus.immune import ImmuneCascade
 from erasmus.ledger import EpistemicLedger
 from erasmus.missions import MissionEngine, create_mission
 from erasmus.review import tenth_man_prompt
@@ -67,6 +68,25 @@ def main() -> None:
 
     review = sub.add_parser("review")
     review.add_argument("--proposition", required=True)
+
+    immune_process = sub.add_parser("immune-process")
+    immune_process.add_argument("event")
+    immune_process.add_argument("--authority", required=True)
+    immune_inspect = sub.add_parser("immune-inspect")
+    immune_inspect.add_argument("incident_id", type=int)
+    sub.add_parser("immune-agents")
+    immune_false_positive = sub.add_parser("immune-false-positive")
+    immune_false_positive.add_argument("incident_id", type=int)
+    immune_false_positive.add_argument("detector")
+    immune_false_positive.add_argument("--agent-id")
+    immune_false_positive.add_argument("--reason", required=True)
+    immune_false_positive.add_argument("--actor", required=True)
+    immune_false_positive.add_argument("--authority", required=True)
+    immune_retire = sub.add_parser("immune-retire")
+    immune_retire.add_argument("agent_id")
+    immune_retire.add_argument("--reason", required=True)
+    immune_retire.add_argument("--actor", required=True)
+    immune_retire.add_argument("--authority", required=True)
 
     evidence_add = sub.add_parser("ledger-evidence-add")
     evidence_add.add_argument("content")
@@ -195,6 +215,8 @@ def main() -> None:
             "missions",
             "experience_candidates",
             "immune_state",
+            "immune_incidents",
+            "immune_findings",
             "checkpoints",
             "sessions",
             "capabilities",
@@ -279,6 +301,29 @@ def main() -> None:
 
     elif args.cmd == "review":
         print(tenth_man_prompt(args.proposition))
+
+    elif args.cmd == "immune-process":
+        event = json.loads(Path(args.event).read_text(encoding="utf-8"))
+        print(json.dumps(ImmuneCascade(store).process(event, args.authority), indent=2))
+
+    elif args.cmd == "immune-inspect":
+        print(json.dumps(ImmuneCascade(store).inspect(args.incident_id), indent=2))
+
+    elif args.cmd == "immune-agents":
+        print(json.dumps(ImmuneCascade(store).list_agents(), indent=2))
+
+    elif args.cmd == "immune-false-positive":
+        cascade = ImmuneCascade(store)
+        cascade.record_false_positive(
+            args.incident_id, args.detector, args.reason, args.actor,
+            args.authority, args.agent_id,
+        )
+        print(json.dumps(cascade.inspect(args.incident_id), indent=2))
+
+    elif args.cmd == "immune-retire":
+        cascade = ImmuneCascade(store)
+        cascade.retire_agent(args.agent_id, args.reason, args.actor, args.authority)
+        print(json.dumps(cascade.list_agents(), indent=2))
 
     elif args.cmd == "ledger-evidence-add":
         evidence_id = EpistemicLedger(store).add_evidence(

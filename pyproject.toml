@@ -20,6 +20,7 @@ packages = ["src/erasmus"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "contracts/mission.schema.json" = "erasmus/contracts/mission.schema.json"
+"contracts/immune-agent.schema.json" = "erasmus/contracts/immune-agent.schema.json"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

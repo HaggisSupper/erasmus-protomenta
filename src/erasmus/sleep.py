@@ -251,27 +251,25 @@ def _classify(event_id: int, kind: str, raw_payload: str):
         pass
 
     if kind == "correction":
-        content = _normalize_content(raw_payload)
-        if not content:
+        if not _normalize_content(raw_payload):
             return source, None, "", {}, "rejected", "candidate content is required"
         return (
-            source, "behavioral_lesson", content,
+            source, "behavioral_lesson", raw_payload,
             {"source_event_id": event_id, "source_class": source},
             "deferred", "legacy correction retained as a deferred lesson",
         )
     if payload is None:
-        content = _normalize_content(raw_payload)
-        if not content:
+        if not _normalize_content(raw_payload):
             return source, None, "", {}, "rejected", "candidate content is required"
         if source in {"external", "erasmus"}:
             return (
-                source, "rag_insert", content,
+                source, "rag_insert", raw_payload,
                 {"source_event_id": event_id, "source_class": source, "trust": "untrusted"},
                 "quarantined", "external or model content defaults to quarantine",
             )
         if source == "protomentat":
             return (
-                source, "rag_insert", content,
+                source, "rag_insert", raw_payload,
                 {"source_event_id": event_id, "source_class": source},
                 "accepted", "explicit human input accepted only as memory candidate",
             )
@@ -279,9 +277,10 @@ def _classify(event_id: int, kind: str, raw_payload: str):
 
     candidate_type = payload.get("candidate_type")
     raw_content = payload.get("content")
-    content = _normalize_content(raw_content) if isinstance(raw_content, str) else ""
-    if candidate_type not in CANDIDATE_TYPES or not content:
+    normalized_content = _normalize_content(raw_content)
+    if candidate_type not in CANDIDATE_TYPES or not normalized_content:
         return source, None, "", {}, "rejected", "candidate type and content are required"
+    content = raw_content
     provenance = {
         "source_event_id": event_id,
         "source_class": source,
@@ -351,8 +350,7 @@ def _defer_adaptations(store: Store, run_id: int) -> int:
     ).fetchall()
     with store.db:
         for row in rows:
-            lesson = _normalize_content(row["content"])
-            if not lesson:
+            if not _normalize_content(row["content"]):
                 continue
             cursor = store.db.execute(
                 """
@@ -360,7 +358,7 @@ def _defer_adaptations(store: Store, run_id: int) -> int:
                     lesson, status, created_at, source_event_id
                 ) VALUES(?, 'candidate', CURRENT_TIMESTAMP, ?)
                 """,
-                (lesson, row["event_id"]),
+                (row["content"], row["event_id"]),
             )
             created += cursor.rowcount
     return created

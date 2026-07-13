@@ -165,7 +165,7 @@ def test_quarantine_does_not_block_later_trusted_normalized_candidate(tmp_path):
         "quarantined", "deferred"
     ]
     assert [item["content"] for item in report["items"]] == [
-        "reviewed claim", "reviewed claim"
+        "  reviewed   claim  ", "reviewed claim"
     ]
 
 
@@ -178,7 +178,7 @@ def test_normalization_detects_duplicates_and_rejects_whitespace_only(tmp_path):
     assert [item["disposition"] for item in report["items"]] == [
         "deferred", "rejected", "rejected"
     ]
-    assert report["items"][0]["content"] == "same claim"
+    assert report["items"][0]["content"] == "same\n claim"
     assert report["items"][2]["candidate_id"] is None
     assert sleep_module._normalize_content(None) == ""
 

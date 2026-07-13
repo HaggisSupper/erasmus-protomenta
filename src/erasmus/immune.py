@@ -442,6 +442,13 @@ class ImmuneCascade:
                     "non-canonical content crossed the belief boundary", 1.0,
                 )
             )
+        if event.event_type == "divergence_recommendation" and event.pathological and not anomalies:
+            anomalies.append(
+                Anomaly(
+                    "behavioral_divergence", "detector recommended immune review",
+                    min(1.0, 0.5 + event.consequence / 2), dict(event.context),
+                )
+            )
         return anomalies
 
     def _investigate(

@@ -1,3 +1,4 @@
+import sqlite3
 from copy import deepcopy
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from erasmus.capability_graph import (
     load_manifest,
     validate_manifest,
 )
+from erasmus.migrations import apply_migrations
 from erasmus.store import Store
 
 
@@ -98,6 +100,54 @@ def test_incompatible_ports_and_execution_cycles_are_rejected():
     errors = validate_manifest(manifest)
     assert any("incompatible required port" in error for error in errors)
     assert any("forbidden execution cycle" in error for error in errors)
+
+
+def test_conflicting_prerequisite_port_schemas_fail_closed():
+    manifest = starter()
+    source = capability(manifest, "merge_pull_request")
+    source["inputs"] = [{"name": "shared", "schema": {"type": "string"}}]
+    dependencies = [
+        capability(manifest, "request_human_approval"),
+        capability(manifest, "run_tests"),
+    ]
+    dependencies[0]["outputs"] = [{"name": "shared", "schema": {"type": "string"}}]
+    dependencies[1]["outputs"] = [{"name": "shared", "schema": {"type": "integer"}}]
+    errors = validate_manifest(manifest)
+    assert "ambiguous required port: merge_pull_request@1.0.0.shared" in errors
+
+    dependencies[1]["outputs"] = [{"name": "shared", "schema": {"type": "string"}}]
+    source["inputs"][0]["schema"] = {"type": "boolean"}
+    errors = validate_manifest(manifest)
+    assert "incompatible required port: merge_pull_request@1.0.0.shared" in errors
+
+
+def test_planner_orders_shared_diamond_dependency_once(tmp_path):
+    manifest = starter()
+    merge_ref = "merge_pull_request@1.0.0"
+    inspect_ref = "inspect_git_repository@1.0.0"
+    parents = ("request_human_approval", "run_tests")
+    shared = capability(manifest, "inspect_git_repository")
+    shared["outputs"].extend(
+        port
+        for parent in parents
+        for port in capability(manifest, parent)["inputs"]
+        if port["name"] not in {output["name"] for output in shared["outputs"]}
+    )
+    for parent in parents:
+        manifest["edges"].append(
+            {"from": f"{parent}@1.0.0", "type": "requires", "to": inspect_ref}
+        )
+    capability_graph = graph(tmp_path)
+    capability(manifest, "merge_pull_request")["goals"] = ["diamond"]
+    capability_graph.import_manifest(manifest)
+    plans = capability_graph.plan(
+        "diamond",
+        {"repository:read", "process:execute", "review:request", "approval:request", "repository:merge"},
+    )
+    assert len(plans) == 1
+    ids = [step.capability_id for step in plans[0].steps]
+    assert ids.count("inspect_git_repository") == 1
+    assert ids[-1] == merge_ref.rsplit("@", 1)[0]
 
 
 def test_import_is_atomic_and_rebuildable(tmp_path):
@@ -196,6 +246,40 @@ def test_evidence_rejects_undeclared_implementation(tmp_path):
     with pytest.raises(ValueError, match="undeclared implementation"):
         capability_graph.record_evidence(
             "run_tests", "1.0.0", "ambient_pytest", "1.0.0", {}, {}, "success"
+        )
+
+
+def test_evidence_rejects_unknown_result(tmp_path):
+    capability_graph = graph(tmp_path)
+    with pytest.raises(ValueError, match="success.*failure"):
+        capability_graph.record_evidence(
+            "run_tests", "1.0.0", "pytest", "1.0.0", {}, {}, "maybe"
+        )
+
+
+def test_edge_type_check_migration_preserves_rows_and_rejects_invalid_values():
+    db = sqlite3.connect(":memory:")
+    db.executescript(
+        """
+        CREATE TABLE schema_version(version INTEGER PRIMARY KEY);
+        INSERT INTO schema_version VALUES(1), (2), (3), (4), (5);
+        CREATE TABLE capabilities(
+            id TEXT NOT NULL, version TEXT NOT NULL, PRIMARY KEY(id, version)
+        );
+        INSERT INTO capabilities VALUES('source', '1'), ('target', '1');
+        CREATE TABLE capability_edges(
+            source_id TEXT NOT NULL, source_version TEXT NOT NULL,
+            edge_type TEXT NOT NULL, target_id TEXT NOT NULL, target_version TEXT NOT NULL,
+            PRIMARY KEY(source_id, source_version, edge_type, target_id, target_version)
+        );
+        INSERT INTO capability_edges VALUES('source', '1', 'requires', 'target', '1');
+        """
+    )
+    assert apply_migrations(db) == [6]
+    assert db.execute("SELECT edge_type FROM capability_edges").fetchone() == ("requires",)
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
+        db.execute(
+            "INSERT INTO capability_edges VALUES('source', '1', 'unknown', 'target', '1')"
         )
 
 

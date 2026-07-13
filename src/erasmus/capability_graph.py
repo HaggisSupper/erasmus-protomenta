@@ -185,13 +185,16 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
         ]
         if not required_edges:
             continue
-        available = {
-            port["name"]: port["schema"]
-            for edge in required_edges
-            for port in capabilities[edge["to"]]["outputs"]
-        }
+        available: dict[str, list[dict[str, Any]]] = {}
+        for edge in required_edges:
+            for port in capabilities[edge["to"]]["outputs"]:
+                available.setdefault(port["name"], []).append(port["schema"])
         for required in capabilities[source]["inputs"]:
-            if available.get(required["name"]) != required["schema"]:
+            schemas = available.get(required["name"], [])
+            canonical_schemas = {_canonical(schema) for schema in schemas}
+            if len(canonical_schemas) > 1:
+                errors.append(f"ambiguous required port: {source}.{required['name']}")
+            elif not schemas or schemas[0] != required["schema"]:
                 errors.append(f"incompatible required port: {source}.{required['name']}")
 
     visiting: set[str] = set()
@@ -299,10 +302,10 @@ class CapabilityGraph:
         ).fetchall()
         if not rows:
             raise LookupError("the imported graph has no OKF source documents")
-        root = Path(destination)
+        root = Path(destination).resolve()
         for relative_path, content in rows:
             target = (root / relative_path).resolve()
-            if not target.is_relative_to(root.resolve()):
+            if not target.is_relative_to(root):
                 raise ValueError(f"unsafe OKF document path: {relative_path}")
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
@@ -336,26 +339,29 @@ class CapabilityGraph:
 
         candidates = [ref for ref, item in capabilities.items() if goal in item["goals"]]
         candidates.sort(key=lambda ref: (CLASS_ORDER[capabilities[ref]["classification"]], ref))
+        implementations: dict[str, list[dict[str, Any]]] = {}
+        for item in manifest["implementations"]:
+            implementations.setdefault(
+                f"{item['capability_id']}@{item['capability_version']}", []
+            ).append(item)
         plans: list[CandidatePlan] = []
         for candidate in candidates:
             ordered: list[str] = []
+            ordered_refs: set[str] = set()
 
             def add(ref: str) -> None:
+                if ref in ordered_refs:
+                    return
                 for dependency in sorted(requires[ref]):
                     add(dependency)
-                if ref not in ordered:
-                    ordered.append(ref)
+                ordered.append(ref)
+                ordered_refs.add(ref)
 
             add(candidate)
             if any(pair <= set(ordered) for pair in conflicts):
                 continue
             if any(not set(capabilities[ref]["authority_required"]) <= authorities for ref in ordered):
                 continue
-            implementations: dict[str, list[dict[str, Any]]] = {}
-            for item in manifest["implementations"]:
-                implementations.setdefault(
-                    f"{item['capability_id']}@{item['capability_version']}", []
-                ).append(item)
             if any(len(implementations.get(ref, [])) != 1 for ref in ordered):
                 continue
             # A merge plan is executable only when every prerequisite has
@@ -417,6 +423,8 @@ class CapabilityGraph:
         implementation_id: str, implementation_version: str,
         inputs: Any, outputs: Any, result: str, head_sha: str | None = None,
     ) -> int:
+        if result not in {"success", "failure"}:
+            raise ValueError("evidence result must be 'success' or 'failure'")
         implementation = self.db.execute(
             "SELECT 1 FROM capability_implementations WHERE id=? AND version=? AND capability_id=? AND capability_version=?",
             (implementation_id, implementation_version, capability_id, capability_version),

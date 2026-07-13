@@ -267,6 +267,7 @@ MIGRATIONS: list[tuple[int, str]] = [
         # SQLite cannot add a CHECK constraint in place, so rebuild the edge
         # projection while preserving every valid row from migration 4.
         """
+        DROP TABLE IF EXISTS capability_edges_v6;
         CREATE TABLE capability_edges_v6(
             source_id      TEXT NOT NULL,
             source_version TEXT NOT NULL,
@@ -290,6 +291,37 @@ MIGRATIONS: list[tuple[int, str]] = [
         FROM capability_edges;
         DROP TABLE capability_edges;
         ALTER TABLE capability_edges_v6 RENAME TO capability_edges
+        """,
+    ),
+    (
+        7,
+        # Enforce the same evidence states at the database boundary that the
+        # planner accepts through CapabilityGraph.record_evidence.
+        """
+        DROP TABLE IF EXISTS capability_evidence_v7;
+        CREATE TABLE capability_evidence_v7(
+            id                     INTEGER PRIMARY KEY,
+            capability_id          TEXT NOT NULL,
+            capability_version     TEXT NOT NULL,
+            implementation_id      TEXT NOT NULL,
+            implementation_version TEXT NOT NULL,
+            inputs_json            TEXT NOT NULL,
+            outputs_json           TEXT NOT NULL,
+            head_sha               TEXT,
+            result                 TEXT NOT NULL CHECK(result IN ('success', 'failure')),
+            created_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO capability_evidence_v7(
+            id, capability_id, capability_version, implementation_id,
+            implementation_version, inputs_json, outputs_json, head_sha,
+            result, created_at
+        )
+        SELECT id, capability_id, capability_version, implementation_id,
+               implementation_version, inputs_json, outputs_json, head_sha,
+               result, created_at
+        FROM capability_evidence;
+        DROP TABLE capability_evidence;
+        ALTER TABLE capability_evidence_v7 RENAME TO capability_evidence
         """,
     ),
 ]
@@ -337,6 +369,7 @@ def apply_migrations(db: sqlite3.Connection) -> list[int]:
         if version in applied_versions:
             continue
         with db:
+            db.execute("BEGIN")
             for stmt in _split_statements(sql):
                 db.execute(stmt)
             db.execute(

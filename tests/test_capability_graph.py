@@ -257,7 +257,7 @@ def test_evidence_rejects_unknown_result(tmp_path):
         )
 
 
-def test_edge_type_check_migration_preserves_rows_and_rejects_invalid_values():
+def test_constraint_migrations_are_retryable_and_preserve_valid_rows():
     db = sqlite3.connect(":memory:")
     db.executescript(
         """
@@ -272,14 +272,42 @@ def test_edge_type_check_migration_preserves_rows_and_rejects_invalid_values():
             edge_type TEXT NOT NULL, target_id TEXT NOT NULL, target_version TEXT NOT NULL,
             PRIMARY KEY(source_id, source_version, edge_type, target_id, target_version)
         );
-        INSERT INTO capability_edges VALUES('source', '1', 'requires', 'target', '1');
+        INSERT INTO capability_edges VALUES('source', '1', 'unknown', 'target', '1');
+        CREATE TABLE capability_evidence(
+            id INTEGER PRIMARY KEY, capability_id TEXT NOT NULL,
+            capability_version TEXT NOT NULL, implementation_id TEXT NOT NULL,
+            implementation_version TEXT NOT NULL, inputs_json TEXT NOT NULL,
+            outputs_json TEXT NOT NULL, head_sha TEXT, result TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO capability_evidence(
+            capability_id, capability_version, implementation_id,
+            implementation_version, inputs_json, outputs_json, result
+        ) VALUES('source', '1', 'implementation', '1', '{}', '{}', 'success');
         """
     )
-    assert apply_migrations(db) == [6]
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
+        apply_migrations(db)
+    assert db.execute("SELECT MAX(version) FROM schema_version").fetchone() == (5,)
+    assert db.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='capability_edges_v6'"
+    ).fetchone() is None
+
+    db.execute("DELETE FROM capability_edges")
+    db.execute(
+        "INSERT INTO capability_edges VALUES('source', '1', 'requires', 'target', '1')"
+    )
+    db.commit()
+    assert apply_migrations(db) == [6, 7]
     assert db.execute("SELECT edge_type FROM capability_edges").fetchone() == ("requires",)
+    assert db.execute("SELECT result FROM capability_evidence").fetchone() == ("success",)
     with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
         db.execute(
             "INSERT INTO capability_edges VALUES('source', '1', 'unknown', 'target', '1')"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
+        db.execute(
+            "UPDATE capability_evidence SET result='unknown'"
         )
 
 

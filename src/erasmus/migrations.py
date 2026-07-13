@@ -220,6 +220,48 @@ MIGRATIONS: list[tuple[int, str]] = [
         )
         """,
     ),
+    (
+        5,
+        """
+        CREATE TABLE tool_publishers(
+            key_id     TEXT PRIMARY KEY,
+            public_key TEXT NOT NULL,
+            owner      TEXT NOT NULL,
+            status     TEXT NOT NULL DEFAULT 'trusted'
+        );
+        CREATE TABLE tool_manifests(
+            tool_id       TEXT NOT NULL,
+            version       TEXT NOT NULL,
+            target        TEXT NOT NULL,
+            implementation_id TEXT NOT NULL,
+            digest         TEXT NOT NULL,
+            manifest_json  TEXT NOT NULL,
+            lifecycle      TEXT NOT NULL DEFAULT 'candidate',
+            cache_path     TEXT,
+            registered_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(tool_id, version, target)
+        );
+        CREATE TABLE tool_capabilities(
+            tool_id            TEXT NOT NULL,
+            tool_version       TEXT NOT NULL,
+            target             TEXT NOT NULL,
+            capability_id      TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            PRIMARY KEY(tool_id, tool_version, target, capability_id, capability_version),
+            FOREIGN KEY(tool_id, tool_version, target)
+                REFERENCES tool_manifests(tool_id, version, target) ON DELETE CASCADE
+        );
+        CREATE TABLE tool_audit(
+            id         INTEGER PRIMARY KEY,
+            event      TEXT NOT NULL,
+            tool_id    TEXT NOT NULL,
+            version    TEXT NOT NULL,
+            target     TEXT NOT NULL,
+            detail_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    ),
 ]
 
 

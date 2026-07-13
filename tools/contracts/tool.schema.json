@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "tool_id", "version", "implementation_id", "capabilities", "target", "entrypoint", "digest", "signature", "source", "build_provenance", "runtime_dependencies", "ports", "side_effects", "authority_required", "timeout_seconds", "resource_budget", "rollback", "health_check", "license", "redistribution", "revocation_status"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "tool_id": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "implementation_id": {"type": "string", "minLength": 1},
+    "capabilities": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "object", "required": ["id", "version"], "properties": {"id": {"type": "string", "minLength": 1}, "version": {"type": "string", "minLength": 1}}, "additionalProperties": false}},
+    "target": {"type": "string", "pattern": "^[a-z0-9_.-]+$"},
+    "entrypoint": {"type": "object", "required": ["artifact", "runtime"], "properties": {"artifact": {"type": "string", "minLength": 1}, "runtime": {"enum": ["python", "native"]}}, "additionalProperties": false},
+    "digest": {"type": "object", "required": ["algorithm", "value"], "properties": {"algorithm": {"const": "sha256"}, "value": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "additionalProperties": false},
+    "signature": {"type": "object", "required": ["scheme", "key_id", "value"], "properties": {"scheme": {"const": "ed25519"}, "key_id": {"type": "string", "minLength": 1}, "value": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "source": {"type": "object", "required": ["repository", "commit"], "properties": {"repository": {"type": "string", "format": "uri"}, "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}}, "additionalProperties": false},
+    "build_provenance": {"type": "object", "required": ["builder", "command"], "properties": {"builder": {"type": "string", "minLength": 1}, "command": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "runtime_dependencies": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "ports": {"type": "object", "required": ["inputs", "outputs"], "properties": {"inputs": {"type": "array", "items": {"type": "string"}}, "outputs": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false},
+    "side_effects": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "authority_required": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "timeout_seconds": {"type": "integer", "minimum": 1},
+    "resource_budget": {"type": "object"},
+    "rollback": {"type": "string", "minLength": 1},
+    "health_check": {"type": "array", "items": {"type": "string"}},
+    "license": {"type": "string", "minLength": 1},
+    "redistribution": {"enum": ["allowed", "restricted", "forbidden"]},
+    "revocation_status": {"enum": ["valid", "deprecated", "revoked"]}
+  },
+  "additionalProperties": false
+}

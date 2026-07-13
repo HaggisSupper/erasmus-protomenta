@@ -33,7 +33,7 @@ erasmus --db state\erasmus.db status
 #   "immune_state": 0,
 #   "checkpoints": 0,
 #   "sessions": 0,
-#   "schema_versions": [1, 2, 3, 4]
+#   "schema_versions": [1, 2, 3, 4, 5]
 # }
 ```
 
@@ -188,3 +188,38 @@ frontmatter is a valid YAML 1.2 subset and keeps parsing dependency-free.
 prerequisite has successful execution evidence bound to the requested exact
 head SHA. Re-importing the canonical manifest rebuilds the projection; schema
 migration rollback is the governed revert of migration 4.
+
+## Signed tool registry verification
+
+```powershell
+$db = "state\tool_registry.db"
+$cache = "state\tool-cache"
+$target = "any-py3-none"
+
+erasmus --db $db --tool-cache $cache graph-import "capabilities\okf\pr-governance"
+erasmus --db $db --tool-cache $cache tool-publisher-register "tools\publishers.json"
+
+Get-ChildItem "tools\manifests\*.json" | ForEach-Object {
+    erasmus --db $db --tool-cache $cache tool-register $_.FullName
+}
+
+$manifest = "tools\manifests\sqlite_reader.json"
+$artifact = "tools\artifacts\sqlite_reader.py"
+erasmus --db $db --tool-cache $cache tool-verify $manifest $artifact
+erasmus --db $db --tool-cache $cache tool-install $manifest $artifact
+erasmus --db $db --tool-cache $cache tool-activate sqlite_reader 1.0.0 $target
+erasmus --db $db --tool-cache $cache tool-health sqlite_reader 1.0.0 $target --authority database:read
+erasmus --db $db --tool-cache $cache tool-list
+erasmus --db $db --tool-cache $cache tool-export "state\tool-registry-export.json"
+erasmus --db $db toolchain-validate TOOLCHAIN.md --manifests tools\manifests
+
+# Reversible removal; audit history and the signed manifest remain.
+erasmus --db $db --tool-cache $cache tool-deactivate sqlite_reader 1.0.0 $target
+erasmus --db $db --tool-cache $cache tool-uninstall sqlite_reader 1.0.0 $target
+
+python -m pytest tests\test_tool_registry.py -v
+```
+
+Never place the private signing key in the repository, SQLite registry, cache,
+environment logs, or `TOOLCHAIN.md`. A signature verifies publisher possession;
+it does not grant capability authority.

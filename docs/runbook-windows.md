@@ -42,7 +42,7 @@ erasmus --db state\erasmus.db status
 #   "sessions": 0,
 #   "local_runtime_sessions": 0,
 #   "runtime_identity_changes": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 # }
 ```
 
@@ -415,12 +415,19 @@ python -m pytest tests\test_divergence.py -v
 # of objects containing label, consequence, and events.
 erasmus --db state\divergence.db divergence-calibrate baseline.json robust_mad statistical 3 `
   --actor reviewer --reason "reviewed normal baseline"
-erasmus --db state\divergence.db divergence-evaluate fixtures.json
+erasmus --db state\divergence.db divergence-evaluate fixtures.json `
+  --authority immune:inspect
+erasmus --db state\divergence.db divergence-downweight 1 --recommendation 7 `
+  --actor regulator --reason "verified labeled false positive" `
+  --authority immune:regulate
 ```
 
 Evaluation persists precision, recall, false-positive rate, and missed
-high-consequence counts. A regulator downweights a noisy detector by appending
-a new calibration record; prior thresholds and results remain auditable.
+high-consequence counts without waking live investigators. Direct non-pass
+evaluations enter the immune cascade under `immune:inspect`. A regulator
+downweights a noisy detector only from a labeled
+false-positive recommendation under `immune:regulate`; the new calibration
+retains both source references, while prior thresholds and results remain auditable.
 Low-prior novelty alone does not wake investigators without consequence or a
 risk feature. Rollback deactivates the optional capability and reverts code;
-restore the pre-migration-14 backup to remove the additive schema offline.
+restore the pre-migration-15 backup to remove the additive schema offline.

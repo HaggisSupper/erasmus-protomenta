@@ -8,6 +8,12 @@ import statistics
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
 
+from erasmus.capability_runtime import (
+    CapabilityRequest,
+    CapabilityRuntime,
+    CapabilityRuntimeError,
+)
+from erasmus.immune import ImmuneCascade
 from erasmus.store import Store
 
 
@@ -43,22 +49,18 @@ def extract_features(events: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     count = len(events)
     evidence = sum(_number(event, "evidence_delta", 0) for event in events)
     confidences = [_number(event, "confidence", 0) for event in events]
-    agreements = sum(bool(event.get("agreement")) for event in events)
-    contradictions = sum(bool(event.get("contradiction")) for event in events)
-    corrections = sum(bool(event.get("correction")) for event in events)
-    assertions = sum(bool(event.get("assertion")) for event in events)
+    agreements = sum(_flag(event, "agreement") for event in events)
+    contradictions = sum(_flag(event, "contradiction") for event in events)
+    corrections = sum(_flag(event, "correction") for event in events)
+    assertions = sum(_flag(event, "assertion") for event in events)
     trust = [event.get("source_trust", "unknown") for event in events]
     if any(not isinstance(item, str) for item in trust):
         raise DivergenceError("source_trust must be a string")
     authority = 0
     for event in events:
-        requested = event.get("requested_authority", ())
-        if not isinstance(requested, (list, tuple)) or any(
-            not isinstance(item, str) for item in requested
-        ):
-            raise DivergenceError("requested_authority must be an array of strings")
-        authority += len(requested)
-    disagreement = sum(bool(event.get("retrieval_disagreement")) for event in events)
+        authority += len(_string_array(event, "requested_authority"))
+        _string_array(event, "declared_authority")
+    disagreement = sum(_flag(event, "retrieval_disagreement") for event in events)
     return {
         "evidence_count_change": float(evidence),
         "confidence_trajectory": confidences[-1] - confidences[0],
@@ -113,25 +115,38 @@ class DivergenceEngine:
             )
         return int(cursor.lastrowid)
 
-    def downweight(self, calibration_id: int, actor: str, reason: str) -> int:
+    def downweight(
+        self, calibration_id: int, false_positive_recommendation_id: int,
+        actor: str, reason: str, authority: str,
+    ) -> int:
+        self._authorize(authority, "immune:regulate")
         if not isinstance(actor, str) or not actor.strip() or not isinstance(reason, str) or not reason.strip():
             raise DivergenceError("regulator actor and reason are required")
-        row = self.store.db.execute(
-            "SELECT * FROM divergence_calibrations WHERE id = ?", (calibration_id,)
+        row = self._calibration(calibration_id)
+        false_positive = self.store.db.execute(
+            """
+            SELECT 1 FROM divergence_recommendations AS recommendation
+            JOIN divergence_windows AS window ON window.id = recommendation.window_id
+            WHERE recommendation.id = ? AND recommendation.calibration_id = ?
+              AND recommendation.outcome != 'pass' AND window.label = 'normal'
+            """,
+            (false_positive_recommendation_id, calibration_id),
         ).fetchone()
-        if row is None:
-            raise DivergenceError("calibration not found")
+        if false_positive is None:
+            raise DivergenceError("downweight requires a labeled false-positive recommendation")
         baseline = json.loads(row["baseline_json"])
         with self.store.db:
             cursor = self.store.db.execute(
                 """
                 INSERT INTO divergence_calibrations(
-                    detector, version, kind, threshold, baseline_json, weight, reason, actor
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                    detector, version, kind, threshold, baseline_json, weight, reason, actor,
+                    source_calibration_id, false_positive_recommendation_id
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["detector"], row["version"], row["kind"], row["threshold"],
                     _json(baseline), max(0.1, row["weight"] * 0.5), reason, actor,
+                    calibration_id, false_positive_recommendation_id,
                 ),
             )
         return int(cursor.lastrowid)
@@ -139,7 +154,8 @@ class DivergenceEngine:
     def evaluate(
         self, events: Sequence[Mapping[str, Any]], *, consequence: float,
         calibration_id: int | None = None,
-        label: str | None = None, source_refs: Sequence[str] = (),
+        label: str | None = None, source_refs: Sequence[str] = (), authority: str = "",
+        _integrate_immune: bool = True,
     ) -> dict[str, Any]:
         if not 0 <= consequence <= 1:
             raise DivergenceError("consequence must be between 0 and 1")
@@ -151,6 +167,13 @@ class DivergenceEngine:
             calibration = self._calibration(calibration_id)
             if calibration["kind"] == "classical" and not self._classical_active():
                 raise DivergenceError("classical detector capability is not active")
+        detections = self._deterministic(features, consequence)
+        if calibration is not None:
+            detections.append(self._calibrated(
+                features, consequence, calibration, calibration_id, authority, source_refs
+            ))
+        if _integrate_immune and any(detection.outcome != "pass" for detection in detections):
+            self._authorize(authority, "immune:inspect")
         with self.store.db:
             window = self.store.db.execute(
                 """
@@ -161,9 +184,6 @@ class DivergenceEngine:
                 (VERSION, _json(features), consequence, label, _json(list(source_refs))),
             )
         window_id = int(window.lastrowid)
-        detections = self._deterministic(features, consequence)
-        if calibration is not None:
-            detections.append(self._calibrated(features, consequence, calibration))
         ids = []
         with self.store.db:
             for detection in detections:
@@ -181,14 +201,21 @@ class DivergenceEngine:
                     ),
                 )
                 ids.append(int(cursor.lastrowid))
+        immune_incident_id = None
+        if _integrate_immune and any(detection.outcome != "pass" for detection in detections):
+            immune_incident_id = self._wake_immune(
+                events, features, detections, consequence, window_id, source_refs, authority
+            )
         return {
             "window_id": window_id, "features": features,
             "recommendations": [asdict(detection) for detection in detections],
             "recommendation_ids": ids,
+            "immune_incident_id": immune_incident_id,
         }
 
     def evaluate_fixtures(
         self, fixtures: Sequence[Mapping[str, Any]], *, calibration_id: int | None = None,
+        authority: str = "",
     ) -> dict[str, float]:
         outcomes = []
         for fixture in fixtures:
@@ -201,7 +228,8 @@ class DivergenceEngine:
             result = self.evaluate(
                 fixture["events"], consequence=consequence,
                 calibration_id=calibration_id,
-                label=str(fixture["label"]),
+                label=str(fixture["label"]), authority=authority,
+                _integrate_immune=False,
             )
             predicted = any(item["outcome"] != "pass" for item in result["recommendations"])
             outcomes.append((fixture["label"] == "divergent", predicted, consequence))
@@ -237,26 +265,80 @@ class DivergenceEngine:
             )
         })]
 
-    def _calibrated(self, features: Mapping[str, float], consequence: float, row) -> Detection:
+    def _calibrated(
+        self, features: Mapping[str, float], consequence: float, row,
+        calibration_id: int, authority: str, source_refs: Sequence[str],
+    ) -> Detection:
         baseline = json.loads(row["baseline_json"])
         deviations = {
             name: abs(features[name] - baseline["center"][name]) / baseline["scale"][name]
             for name in FEATURES
         }
         if row["kind"] == "classical":
-            distances = [
-                math.sqrt(sum(((features[name] - sample[name]) / baseline["scale"][name]) ** 2 for name in FEATURES))
-                for sample in baseline["rows"]
-            ]
-            raw_score = min(distances)
+            runtime = CapabilityRuntime(self.store)
+            try:
+                runtime.configure(
+                    "detect_divergence_knn", VERSION,
+                    "interpretable_knn_detector", VERSION,
+                    lambda request: _knn_outputs(
+                        request["features"], baseline, float(row["weight"])
+                    ),
+                )
+            except CapabilityRuntimeError as error:
+                raise DivergenceError(f"classical detector failed closed: {error}") from error
+            result = runtime.invoke(CapabilityRequest(
+                "detect_divergence_knn", VERSION,
+                {"features": dict(features), "calibration_id": calibration_id},
+                frozenset({authority}),
+                {"feature_window": dict(features), "calibration_id": calibration_id},
+                evidence_refs=tuple(source_refs) + (f"calibration:{calibration_id}",),
+            ))
+            if not result.ok:
+                raise DivergenceError(
+                    f"classical detector failed closed: {result.failure['code']}"
+                )
+            score = float(result.outputs["score"])
+            contributors = dict(result.outputs["contributing_features"])
         else:
             raw_score = max(deviations.values())
-        score = raw_score * row["weight"]
+            score = raw_score * row["weight"]
+            contributors = dict(sorted(
+                deviations.items(), key=lambda item: item[1], reverse=True
+            )[:3])
         risky = consequence >= 0.3 or features["authority_requests"] > 0 or features["evidence_count_change"] < 0
         outcome = "escalate" if score >= row["threshold"] and consequence >= 0.8 else "wake" if score >= row["threshold"] and risky else "pass"
-        contributors = dict(sorted(deviations.items(), key=lambda item: item[1], reverse=True)[:3])
         reasons = (f"score {score:.3f} against threshold {row['threshold']:.3f}",)
         return Detection(row["detector"], score, row["threshold"], outcome, reasons, contributors)
+
+    def _wake_immune(
+        self, events: Sequence[Mapping[str, Any]], features: Mapping[str, float],
+        detections: Sequence[Detection], consequence: float, window_id: int,
+        source_refs: Sequence[str], authority: str,
+    ) -> int:
+        requested = tuple(
+            item for event in events
+            for item in _string_array(event, "requested_authority")
+        )
+        declared = tuple(
+            item for event in events
+            for item in _string_array(event, "declared_authority")
+        )
+        incident = ImmuneCascade(self.store).process({
+            "event_type": "divergence_recommendation",
+            "confidence_delta": features["confidence_trajectory"],
+            "new_evidence": max(0, math.ceil(features["evidence_count_change"])),
+            "requested_authority": requested,
+            "declared_authority": declared,
+            "repeated_agreement": sum(_flag(event, "agreement") for event in events),
+            "pathological": True,
+            "consequence": consequence,
+            "canonical_ref": f"divergence-window:{window_id}",
+            "context": {
+                "recommendations": [asdict(detection) for detection in detections],
+                "source_refs": list(source_refs),
+            },
+        }, authority)
+        return int(incident["id"])
 
     def _calibration(self, calibration_id: int):
         row = self.store.db.execute(
@@ -280,12 +362,55 @@ class DivergenceEngine:
             (VERSION,),
         ).fetchone() is not None
 
+    @staticmethod
+    def _authorize(actual: str, expected: str) -> None:
+        if actual != expected:
+            raise DivergenceError(f"authority denied: expected {expected}")
+
 
 def _number(event: Mapping[str, Any], name: str, default: float) -> float:
     value = event.get(name, default)
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise DivergenceError(f"{name} must be numeric")
     return float(value)
+
+
+def _flag(event: Mapping[str, Any], name: str) -> bool:
+    value = event.get(name, False)
+    if not isinstance(value, bool):
+        raise DivergenceError(f"{name} must be boolean")
+    return value
+
+
+def _string_array(event: Mapping[str, Any], name: str) -> tuple[str, ...]:
+    value = event.get(name, ())
+    if not isinstance(value, (list, tuple)) or any(
+        not isinstance(item, str) for item in value
+    ):
+        raise DivergenceError(f"{name} must be an array of strings")
+    return tuple(value)
+
+
+def _knn_outputs(
+    features: Mapping[str, float], baseline: Mapping[str, Any], weight: float,
+) -> dict[str, Any]:
+    deviations = {
+        name: abs(features[name] - baseline["center"][name]) / baseline["scale"][name]
+        for name in FEATURES
+    }
+    distances = [
+        math.sqrt(sum(
+            ((features[name] - sample[name]) / baseline["scale"][name]) ** 2
+            for name in FEATURES
+        ))
+        for sample in baseline["rows"]
+    ]
+    return {
+        "score": min(distances) * weight,
+        "contributing_features": dict(sorted(
+            deviations.items(), key=lambda item: item[1], reverse=True
+        )[:3]),
+    }
 
 
 def _json(value: Any) -> str:

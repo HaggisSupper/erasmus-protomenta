@@ -912,6 +912,22 @@ MIGRATIONS: list[tuple[int, str]] = [
         BEGIN SELECT RAISE(ABORT, 'divergence evaluations are append-only'); END;
         """,
     ),
+    (
+        15,
+        # Preserve the source calibration and verified false-positive
+        # recommendation behind every regulator downweight.
+        """
+        ALTER TABLE divergence_calibrations
+        ADD COLUMN source_calibration_id INTEGER
+        REFERENCES divergence_calibrations(id);
+        ALTER TABLE divergence_calibrations
+        ADD COLUMN false_positive_recommendation_id INTEGER
+        REFERENCES divergence_recommendations(id);
+        CREATE UNIQUE INDEX divergence_calibration_false_positive_once
+        ON divergence_calibrations(false_positive_recommendation_id)
+        WHERE false_positive_recommendation_id IS NOT NULL;
+        """,
+    ),
 ]
 
 

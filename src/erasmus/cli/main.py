@@ -129,10 +129,13 @@ def main() -> None:
     divergence_evaluate = sub.add_parser("divergence-evaluate")
     divergence_evaluate.add_argument("fixtures")
     divergence_evaluate.add_argument("--calibration", type=int)
+    divergence_evaluate.add_argument("--authority", required=True)
     divergence_downweight = sub.add_parser("divergence-downweight")
     divergence_downweight.add_argument("calibration", type=int)
+    divergence_downweight.add_argument("--recommendation", type=int, required=True)
     divergence_downweight.add_argument("--actor", required=True)
     divergence_downweight.add_argument("--reason", required=True)
+    divergence_downweight.add_argument("--authority", required=True)
 
     evidence_add = sub.add_parser("ledger-evidence-add")
     evidence_add.add_argument("content")
@@ -437,13 +440,14 @@ def main() -> None:
     elif args.cmd == "divergence-evaluate":
         fixtures = json.loads(Path(args.fixtures).read_text(encoding="utf-8"))
         metrics = DivergenceEngine(store).evaluate_fixtures(
-            fixtures, calibration_id=args.calibration
+            fixtures, calibration_id=args.calibration, authority=args.authority
         )
         print(json.dumps(metrics, indent=2))
 
     elif args.cmd == "divergence-downweight":
         calibration_id = DivergenceEngine(store).downweight(
-            args.calibration, args.actor, args.reason
+            args.calibration, args.recommendation, args.actor, args.reason,
+            args.authority,
         )
         print(json.dumps({"calibration_id": calibration_id}, indent=2))
 

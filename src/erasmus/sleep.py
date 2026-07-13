@@ -311,14 +311,27 @@ def _conflict(store: Store, event_id: int, candidate_type: str, content: str) ->
             return "current ledger already contains this proposition"
     prior = store.db.execute(
         """
+        SELECT 1 FROM sleep_candidates c
+        JOIN sleep_items i ON i.event_id = c.event_id
+        WHERE c.event_id != ? AND c.candidate_type = ?
+          AND i.disposition IN ('accepted', 'deferred')
+          AND c.content = ?
+        """,
+        (event_id, candidate_type, normalized),
+    ).fetchone()
+    if prior is not None:
+        return "prior consolidated material already contains this candidate"
+    legacy = store.db.execute(
+        """
         SELECT c.content FROM sleep_candidates c
         JOIN sleep_items i ON i.event_id = c.event_id
         WHERE c.event_id != ? AND c.candidate_type = ?
           AND i.disposition IN ('accepted', 'deferred')
+          AND c.content != ?
         """,
-        (event_id, candidate_type),
+        (event_id, candidate_type, normalized),
     ).fetchall()
-    if any(_normalize_content(row["content"]) == normalized for row in prior):
+    if any(_normalize_content(row["content"]) == normalized for row in legacy):
         return "prior consolidated material already contains this candidate"
     return None
 
@@ -349,15 +362,16 @@ def _defer_adaptations(store: Store, run_id: int) -> int:
 
 
 def _open_or_resume_run(store: Store, start_event_id: int, end_event_id: int) -> int:
-    resumable = store.db.execute(
-        """
-        SELECT id FROM sleep_runs
-        WHERE status IN ('failed', 'running') AND version = ? AND start_event_id = ?
-        ORDER BY id DESC LIMIT 1
-        """,
-        (VERSION, start_event_id),
-    ).fetchone()
-    with store.db:
+    try:
+        store.db.execute("BEGIN IMMEDIATE")
+        resumable = store.db.execute(
+            """
+            SELECT id FROM sleep_runs
+            WHERE status IN ('failed', 'running') AND version = ? AND start_event_id = ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (VERSION, start_event_id),
+        ).fetchone()
         if resumable is not None:
             run_id = int(resumable["id"])
             store.db.execute(
@@ -382,6 +396,10 @@ def _open_or_resume_run(store: Store, start_event_id: int, end_event_id: int) ->
             "INSERT INTO sleep_run_stages(run_id, stage, detail_json) VALUES(?, 'quarantine', ?)",
             (run_id, _json({"start_event_id": start_event_id, "end_event_id": end_event_id})),
         )
+        store.db.commit()
+    except Exception:
+        store.db.rollback()
+        raise
     return run_id
 
 
@@ -423,5 +441,7 @@ def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def _normalize_content(content: str) -> str:
+def _normalize_content(content: Any) -> str:
+    if not isinstance(content, str):
+        return ""
     return " ".join(content.split())

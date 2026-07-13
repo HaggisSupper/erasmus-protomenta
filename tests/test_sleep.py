@@ -180,6 +180,7 @@ def test_normalization_detects_duplicates_and_rejects_whitespace_only(tmp_path):
     ]
     assert report["items"][0]["content"] == "same claim"
     assert report["items"][2]["candidate_id"] is None
+    assert sleep_module._normalize_content(None) == ""
 
 
 def test_failure_after_reconciliation_resumes_same_run_without_duplicates(tmp_path):

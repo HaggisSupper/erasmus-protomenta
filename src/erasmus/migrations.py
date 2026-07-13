@@ -445,6 +445,157 @@ MIGRATIONS: list[tuple[int, str]] = [
         END;
         """,
     ),
+    (
+        10,
+        # Append-only epistemic ledger. Proposition rows are immutable;
+        # transitions and confidence history are the source of current state.
+        """
+        CREATE TABLE IF NOT EXISTS propositions(
+            id INTEGER PRIMARY KEY,
+            statement TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0.5,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        ALTER TABLE propositions ADD COLUMN scope TEXT NOT NULL DEFAULT 'global';
+        ALTER TABLE propositions ADD COLUMN created_by TEXT NOT NULL DEFAULT 'legacy';
+        CREATE TABLE epistemic_evidence(
+            id INTEGER PRIMARY KEY,
+            record_type TEXT NOT NULL CHECK(record_type IN (
+                'evidence', 'contradiction', 'falsification_test', 'tangible_wrongness'
+            )),
+            content TEXT NOT NULL,
+            source_kind TEXT NOT NULL CHECK(source_kind IN (
+                'rag', 'model', 'document', 'observation', 'test', 'human'
+            )),
+            provenance_json TEXT NOT NULL,
+            trust_class TEXT NOT NULL CHECK(trust_class IN (
+                'untrusted', 'contextual', 'corroborated', 'primary', 'deterministic'
+            )),
+            effective_date TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            supersedes_id INTEGER,
+            source_event_id INTEGER,
+            actor TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(supersedes_id) REFERENCES epistemic_evidence(id),
+            FOREIGN KEY(source_event_id) REFERENCES events(id)
+        );
+        CREATE TABLE proposition_evidence(
+            id INTEGER PRIMARY KEY,
+            proposition_id INTEGER NOT NULL,
+            evidence_id INTEGER NOT NULL,
+            relation TEXT NOT NULL CHECK(relation IN (
+                'origin', 'support', 'contradiction', 'test', 'falsification',
+                'reopening', 'supersession'
+            )),
+            actor TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(proposition_id, evidence_id, relation),
+            FOREIGN KEY(proposition_id) REFERENCES propositions(id),
+            FOREIGN KEY(evidence_id) REFERENCES epistemic_evidence(id)
+        );
+        CREATE TABLE proposition_transitions(
+            id INTEGER PRIMARY KEY,
+            proposition_id INTEGER NOT NULL,
+            operation TEXT NOT NULL CHECK(operation IN (
+                'propose', 'support', 'contradict', 'falsify', 'reopen', 'supersede'
+            )),
+            prior_status TEXT,
+            new_status TEXT NOT NULL CHECK(new_status IN (
+                'established', 'supported', 'plausible', 'speculative', 'analogy',
+                'leap', 'contradicted', 'falsified', 'unresolved'
+            )),
+            evidence_id INTEGER NOT NULL,
+            actor TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(proposition_id) REFERENCES propositions(id),
+            FOREIGN KEY(evidence_id) REFERENCES epistemic_evidence(id)
+        );
+        CREATE TABLE confidence_history(
+            id INTEGER PRIMARY KEY,
+            proposition_id INTEGER NOT NULL,
+            confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+            evidence_id INTEGER NOT NULL,
+            actor TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(proposition_id) REFERENCES propositions(id),
+            FOREIGN KEY(evidence_id) REFERENCES epistemic_evidence(id)
+        );
+        CREATE TABLE proposition_supersessions(
+            id INTEGER PRIMARY KEY,
+            proposition_id INTEGER NOT NULL UNIQUE,
+            replacement_id INTEGER NOT NULL,
+            evidence_id INTEGER NOT NULL,
+            actor TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CHECK(proposition_id != replacement_id),
+            FOREIGN KEY(proposition_id) REFERENCES propositions(id),
+            FOREIGN KEY(replacement_id) REFERENCES propositions(id),
+            FOREIGN KEY(evidence_id) REFERENCES epistemic_evidence(id)
+        );
+        CREATE TABLE IF NOT EXISTS checkpoints(
+            id INTEGER PRIMARY KEY,
+            frontier TEXT NOT NULL,
+            next_move TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        ALTER TABLE checkpoints ADD COLUMN proposition_id INTEGER REFERENCES propositions(id);
+        CREATE TRIGGER propositions_no_update
+        BEFORE UPDATE ON propositions BEGIN
+            SELECT RAISE(ABORT, 'propositions are append-only');
+        END;
+        CREATE TRIGGER propositions_no_delete
+        BEFORE DELETE ON propositions BEGIN
+            SELECT RAISE(ABORT, 'propositions are append-only');
+        END;
+        CREATE TRIGGER epistemic_evidence_no_update
+        BEFORE UPDATE ON epistemic_evidence BEGIN
+            SELECT RAISE(ABORT, 'epistemic evidence is append-only');
+        END;
+        CREATE TRIGGER epistemic_evidence_no_delete
+        BEFORE DELETE ON epistemic_evidence BEGIN
+            SELECT RAISE(ABORT, 'epistemic evidence is append-only');
+        END;
+        CREATE TRIGGER proposition_evidence_no_update
+        BEFORE UPDATE ON proposition_evidence BEGIN
+            SELECT RAISE(ABORT, 'proposition evidence links are append-only');
+        END;
+        CREATE TRIGGER proposition_evidence_no_delete
+        BEFORE DELETE ON proposition_evidence BEGIN
+            SELECT RAISE(ABORT, 'proposition evidence links are append-only');
+        END;
+        CREATE TRIGGER proposition_transitions_no_update
+        BEFORE UPDATE ON proposition_transitions BEGIN
+            SELECT RAISE(ABORT, 'proposition transitions are append-only');
+        END;
+        CREATE TRIGGER proposition_transitions_no_delete
+        BEFORE DELETE ON proposition_transitions BEGIN
+            SELECT RAISE(ABORT, 'proposition transitions are append-only');
+        END;
+        CREATE TRIGGER confidence_history_no_update
+        BEFORE UPDATE ON confidence_history BEGIN
+            SELECT RAISE(ABORT, 'confidence history is append-only');
+        END;
+        CREATE TRIGGER confidence_history_no_delete
+        BEFORE DELETE ON confidence_history BEGIN
+            SELECT RAISE(ABORT, 'confidence history is append-only');
+        END;
+        CREATE TRIGGER proposition_supersessions_no_update
+        BEFORE UPDATE ON proposition_supersessions BEGIN
+            SELECT RAISE(ABORT, 'proposition supersessions are append-only');
+        END;
+        CREATE TRIGGER proposition_supersessions_no_delete
+        BEFORE DELETE ON proposition_supersessions BEGIN
+            SELECT RAISE(ABORT, 'proposition supersessions are append-only');
+        END;
+        """,
+    ),
 ]
 
 

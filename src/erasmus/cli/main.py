@@ -19,6 +19,7 @@ from erasmus.capability_runtime import (
     validate_json_schema,
 )
 from erasmus.checkpoint import load_latest_checkpoint
+from erasmus.ledger import EpistemicLedger
 from erasmus.missions import MissionEngine, create_mission
 from erasmus.review import tenth_man_prompt
 from erasmus.sleep import consolidate
@@ -66,6 +67,58 @@ def main() -> None:
 
     review = sub.add_parser("review")
     review.add_argument("--proposition", required=True)
+
+    evidence_add = sub.add_parser("ledger-evidence-add")
+    evidence_add.add_argument("content")
+    evidence_add.add_argument("--type", required=True)
+    evidence_add.add_argument("--source-kind", required=True)
+    evidence_add.add_argument("--provenance", required=True)
+    evidence_add.add_argument("--trust", required=True)
+    evidence_add.add_argument("--effective-date", required=True)
+    evidence_add.add_argument("--scope", default="global")
+    evidence_add.add_argument("--actor", required=True)
+    evidence_add.add_argument("--authority", required=True)
+    evidence_add.add_argument("--source-event-id", type=int)
+    evidence_add.add_argument("--supersedes-id", type=int)
+
+    ledger_propose = sub.add_parser("ledger-propose")
+    ledger_propose.add_argument("statement")
+    ledger_propose.add_argument("evidence_id", type=int)
+    ledger_propose.add_argument("--status", default="speculative")
+    ledger_propose.add_argument("--scope", default="global")
+    ledger_propose.add_argument("--actor", required=True)
+    ledger_propose.add_argument("--authority", required=True)
+    ledger_propose.add_argument("--reason", default="proposed for evaluation")
+
+    ledger_transition = sub.add_parser("ledger-transition")
+    ledger_transition.add_argument("proposition_id", type=int)
+    ledger_transition.add_argument("operation")
+    ledger_transition.add_argument("evidence_id", type=int)
+    ledger_transition.add_argument("--target")
+    ledger_transition.add_argument("--test-id", type=int)
+    ledger_transition.add_argument("--actor", required=True)
+    ledger_transition.add_argument("--authority", required=True)
+    ledger_transition.add_argument("--reason", required=True)
+
+    ledger_confidence = sub.add_parser("ledger-confidence")
+    ledger_confidence.add_argument("proposition_id", type=int)
+    ledger_confidence.add_argument("confidence", type=float)
+    ledger_confidence.add_argument("evidence_id", type=int)
+    ledger_confidence.add_argument("--actor", required=True)
+    ledger_confidence.add_argument("--authority", required=True)
+    ledger_confidence.add_argument("--reason", required=True)
+
+    ledger_supersede = sub.add_parser("ledger-supersede")
+    ledger_supersede.add_argument("proposition_id", type=int)
+    ledger_supersede.add_argument("replacement_id", type=int)
+    ledger_supersede.add_argument("evidence_id", type=int)
+    ledger_supersede.add_argument("--actor", required=True)
+    ledger_supersede.add_argument("--authority", required=True)
+    ledger_supersede.add_argument("--reason", required=True)
+
+    for command in ("ledger-inspect", "ledger-query"):
+        ledger_read = sub.add_parser(command)
+        ledger_read.add_argument("proposition_id", type=int)
 
     backup_cmd = sub.add_parser("backup", help="Back up the database to a file.")
     backup_cmd.add_argument("dest", help="Destination file path.")
@@ -137,6 +190,8 @@ def main() -> None:
         tables = [
             "events",
             "propositions",
+            "epistemic_evidence",
+            "proposition_transitions",
             "missions",
             "experience_candidates",
             "immune_state",
@@ -224,6 +279,50 @@ def main() -> None:
 
     elif args.cmd == "review":
         print(tenth_man_prompt(args.proposition))
+
+    elif args.cmd == "ledger-evidence-add":
+        evidence_id = EpistemicLedger(store).add_evidence(
+            args.type, args.content, args.source_kind, json.loads(args.provenance),
+            args.trust, args.effective_date, args.scope, args.actor, args.authority,
+            args.source_event_id, args.supersedes_id,
+        )
+        print(json.dumps({"evidence_id": evidence_id}, indent=2))
+
+    elif args.cmd == "ledger-propose":
+        proposition_id = EpistemicLedger(store).propose(
+            args.statement, args.evidence_id, args.actor, args.authority,
+            args.scope, args.status, args.reason,
+        )
+        print(json.dumps({"proposition_id": proposition_id}, indent=2))
+
+    elif args.cmd == "ledger-transition":
+        status = EpistemicLedger(store).transition(
+            args.proposition_id, args.operation, args.evidence_id,
+            args.actor, args.authority, args.reason, args.target, args.test_id,
+        )
+        print(json.dumps({"status": status}, indent=2))
+
+    elif args.cmd == "ledger-confidence":
+        ledger = EpistemicLedger(store)
+        ledger.record_confidence(
+            args.proposition_id, args.confidence, args.evidence_id,
+            args.actor, args.authority, args.reason,
+        )
+        print(json.dumps(ledger.inspect(args.proposition_id), indent=2))
+
+    elif args.cmd == "ledger-supersede":
+        ledger = EpistemicLedger(store)
+        ledger.supersede(
+            args.proposition_id, args.replacement_id, args.evidence_id,
+            args.actor, args.authority, args.reason,
+        )
+        print(json.dumps(ledger.inspect(args.proposition_id), indent=2))
+
+    elif args.cmd == "ledger-inspect":
+        print(json.dumps(EpistemicLedger(store).inspect(args.proposition_id), indent=2))
+
+    elif args.cmd == "ledger-query":
+        print(json.dumps(EpistemicLedger(store).query(args.proposition_id), indent=2))
 
     elif args.cmd == "backup":
         dest = Path(args.dest)

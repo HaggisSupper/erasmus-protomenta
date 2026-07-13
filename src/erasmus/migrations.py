@@ -596,6 +596,94 @@ MIGRATIONS: list[tuple[int, str]] = [
         END;
         """,
     ),
+    (
+        11,
+        # Deterministic-first immune incidents, advisory findings, dormant
+        # agent lifecycle history, and regulatory false-positive memory.
+        """
+        CREATE TABLE immune_incidents(
+            id INTEGER PRIMARY KEY,
+            fingerprint TEXT NOT NULL,
+            event_json TEXT NOT NULL,
+            consequence REAL NOT NULL CHECK(consequence >= 0 AND consequence <= 1),
+            canonical_ref TEXT,
+            source_event_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(source_event_id) REFERENCES events(id)
+        );
+        CREATE TABLE immune_findings(
+            id INTEGER PRIMARY KEY,
+            incident_id INTEGER NOT NULL,
+            detector TEXT NOT NULL,
+            agent_id TEXT,
+            outcome TEXT NOT NULL CHECK(outcome IN (
+                'pass', 'flag', 'quarantine', 'lower_confidence_recommendation',
+                'request_counterevidence', 'escalate'
+            )),
+            severity REAL NOT NULL CHECK(severity >= 0 AND severity <= 1),
+            rationale TEXT NOT NULL,
+            mitigation_json TEXT NOT NULL,
+            reversible INTEGER NOT NULL CHECK(reversible IN (0, 1)),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(incident_id) REFERENCES immune_incidents(id)
+        );
+        CREATE TABLE immune_agent_transitions(
+            id INTEGER PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            incident_id INTEGER,
+            from_state TEXT NOT NULL,
+            to_state TEXT NOT NULL CHECK(to_state IN (
+                'sleeping', 'awakened', 'investigating', 'mitigating',
+                'monitoring', 'escalated', 'retired'
+            )),
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(incident_id) REFERENCES immune_incidents(id)
+        );
+        CREATE TABLE immune_false_positives(
+            id INTEGER PRIMARY KEY,
+            incident_id INTEGER NOT NULL,
+            detector TEXT NOT NULL,
+            agent_id TEXT,
+            reason TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(incident_id) REFERENCES immune_incidents(id)
+        );
+        CREATE TRIGGER immune_incidents_no_update
+        BEFORE UPDATE ON immune_incidents BEGIN
+            SELECT RAISE(ABORT, 'immune incidents are append-only');
+        END;
+        CREATE TRIGGER immune_incidents_no_delete
+        BEFORE DELETE ON immune_incidents BEGIN
+            SELECT RAISE(ABORT, 'immune incidents are append-only');
+        END;
+        CREATE TRIGGER immune_findings_no_update
+        BEFORE UPDATE ON immune_findings BEGIN
+            SELECT RAISE(ABORT, 'immune findings are append-only');
+        END;
+        CREATE TRIGGER immune_findings_no_delete
+        BEFORE DELETE ON immune_findings BEGIN
+            SELECT RAISE(ABORT, 'immune findings are append-only');
+        END;
+        CREATE TRIGGER immune_agent_transitions_no_update
+        BEFORE UPDATE ON immune_agent_transitions BEGIN
+            SELECT RAISE(ABORT, 'immune agent transitions are append-only');
+        END;
+        CREATE TRIGGER immune_agent_transitions_no_delete
+        BEFORE DELETE ON immune_agent_transitions BEGIN
+            SELECT RAISE(ABORT, 'immune agent transitions are append-only');
+        END;
+        CREATE TRIGGER immune_false_positives_no_update
+        BEFORE UPDATE ON immune_false_positives BEGIN
+            SELECT RAISE(ABORT, 'immune false positives are append-only');
+        END;
+        CREATE TRIGGER immune_false_positives_no_delete
+        BEFORE DELETE ON immune_false_positives BEGIN
+            SELECT RAISE(ABORT, 'immune false positives are append-only');
+        END;
+        """,
+    ),
 ]
 
 

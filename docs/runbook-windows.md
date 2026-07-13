@@ -33,9 +33,11 @@ erasmus --db state\erasmus.db status
 #   "missions": 0,
 #   "experience_candidates": 0,
 #   "immune_state": 0,
+#   "immune_incidents": 0,
+#   "immune_findings": 0,
 #   "checkpoints": 0,
 #   "sessions": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 # }
 ```
 
@@ -307,3 +309,35 @@ python -m pytest tests\test_ledger.py -v
 Rollback is a code rollback plus database restore from the pre-migration
 backup. Migration 10 is intentionally forward-only because its records are
 append-only; do not drop ledger tables from a live database.
+
+## Cognitive immune cascade verification
+
+The cascade runs deterministic checks first, wakes only matching dormant
+investigators, records advisory mitigations, and returns investigators to
+sleep. It has no authority to update canonical evidence or propositions.
+
+```powershell
+$db = "state\immune-cascade.db"
+erasmus --db $db init
+
+@'
+{
+  "event_type": "retrieval",
+  "source_kind": "rag",
+  "attempted_belief_promotion": true,
+  "consequence": 0.7,
+  "canonical_ref": "proposition:1"
+}
+'@ | Set-Content "state\immune-event.json"
+
+erasmus --db $db immune-process "state\immune-event.json" --authority immune:inspect
+erasmus --db $db immune-agents
+python -m pytest tests\test_immune.py -v
+```
+
+False-positive decisions require `immune:regulate` authority and are appended
+with actor and reason. After repeated verified false positives, the regulator
+suppresses the matching specialist while leaving the incident auditable.
+Consequential unresolved findings use the `escalate` outcome for the
+Protomentat. Rollback restores the database backup taken before migration 11;
+never delete live immune audit rows.

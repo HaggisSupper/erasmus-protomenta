@@ -670,3 +670,35 @@ class TestWindowsPowerShellScript:
         assert cli.exists(), (
             f"Python CLI validation script not found at {cli}"
         )
+
+
+class TestImmutableContract:
+    _ROOT = Path(__file__).parent.parent
+    _CONTRACT = _ROOT / "constitution" / "immutable-contract.md"
+
+    def test_canonical_governance_paths_use_exact_case(self):
+        assert "immutable-contract.md" in {
+            path.name for path in (self._ROOT / "constitution").iterdir()
+        }
+        assert "architecture.md" in {
+            path.name for path in (self._ROOT / "docs").iterdir()
+        }
+
+    def test_required_immutable_invariants_are_present(self):
+        content = self._CONTRACT.read_text(encoding="utf-8")
+        required = (
+            "## Epistemic integrity",
+            "## Authority and dissent",
+            "## Persistence and promotion",
+            "## Capability and operation",
+            "## Provenance and reversibility",
+            "Evidence outranks confidence and agreement.",
+            "The Protomentat retains final authority over consequential ambiguity.",
+            "remain logically separate",
+            "Every capability declares typed input and output",
+            "one process and one SQLite database",
+            "Windows-first operation is required. No Docker.",
+            "independent dissent, provenance, or human sovereignty",
+        )
+        missing = [clause for clause in required if clause not in content]
+        assert not missing, f"immutable contract is missing required clauses: {missing}"

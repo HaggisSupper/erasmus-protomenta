@@ -137,10 +137,26 @@ def test_malformed_windows_calibrations_and_labels_fail_closed(tmp_path):
     engine = DivergenceEngine(_store(tmp_path))
     with pytest.raises(DivergenceError, match="array of strings"):
         extract_features([{"requested_authority": "not-an-array"}])
+    with pytest.raises(DivergenceError, match="source_trust must be a string"):
+        extract_features([{"source_trust": ["high"]}])
     with pytest.raises(DivergenceError, match="regulator actor"):
         engine.downweight(1, "", "")
     with pytest.raises(DivergenceError, match="fixture label"):
         engine.evaluate_fixtures([{"label": "maybe", "events": _normal()}])
+    with pytest.raises(DivergenceError, match="consequence must be numeric"):
+        engine.evaluate_fixtures([
+            {"label": "normal", "consequence": "many", "events": _normal()}
+        ])
+    with engine.store.db:
+        old = engine.store.db.execute(
+            """
+            INSERT INTO divergence_calibrations(
+                detector, version, kind, threshold, baseline_json, weight, reason, actor
+            ) VALUES('old', '0.9.0', 'statistical', 1, '{}', 1, 'old', 'test')
+            """
+        )
+    with pytest.raises(DivergenceError, match="incompatible with engine"):
+        engine.evaluate(_normal(), consequence=0.1, calibration_id=int(old.lastrowid))
 
 
 def test_cli_calibrates_and_evaluates_fixtures(tmp_path, monkeypatch, capsys):

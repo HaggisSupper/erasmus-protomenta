@@ -48,6 +48,8 @@ def extract_features(events: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     corrections = sum(bool(event.get("correction")) for event in events)
     assertions = sum(bool(event.get("assertion")) for event in events)
     trust = [event.get("source_trust", "unknown") for event in events]
+    if any(not isinstance(item, str) for item in trust):
+        raise DivergenceError("source_trust must be a string")
     authority = 0
     for event in events:
         requested = event.get("requested_authority", ())
@@ -64,7 +66,7 @@ def extract_features(events: Sequence[Mapping[str, Any]]) -> dict[str, float]:
         "contradiction_rate": contradictions / count,
         "correction_rate": corrections / count,
         "low_trust_ratio": trust.count("low") / count,
-        "unknown_trust_ratio": sum(item not in {"low", "high"} for item in trust) / count,
+        "unknown_trust_ratio": sum(item not in ("low", "high") for item in trust) / count,
         "high_trust_ratio": trust.count("high") / count,
         "authority_requests": float(authority),
         "retrieval_disagreement": disagreement / count,
@@ -190,13 +192,17 @@ class DivergenceEngine:
         for fixture in fixtures:
             if fixture.get("label") not in {"normal", "divergent"}:
                 raise DivergenceError("fixture label must be normal or divergent")
+            try:
+                consequence = float(fixture.get("consequence", 0))
+            except (TypeError, ValueError) as error:
+                raise DivergenceError("fixture consequence must be numeric") from error
             result = self.evaluate(
-                fixture["events"], consequence=float(fixture.get("consequence", 0)),
+                fixture["events"], consequence=consequence,
                 calibration_id=calibration_id,
                 label=str(fixture["label"]),
             )
             predicted = any(item["outcome"] != "pass" for item in result["recommendations"])
-            outcomes.append((fixture["label"] == "divergent", predicted, fixture.get("consequence", 0)))
+            outcomes.append((fixture["label"] == "divergent", predicted, consequence))
         tp = sum(actual and predicted for actual, predicted, _ in outcomes)
         fp = sum(not actual and predicted for actual, predicted, _ in outcomes)
         fn = sum(actual and not predicted for actual, predicted, _ in outcomes)
@@ -256,6 +262,10 @@ class DivergenceEngine:
         ).fetchone()
         if row is None:
             raise DivergenceError("calibration not found")
+        if row["version"] != VERSION:
+            raise DivergenceError(
+                f"calibration version {row['version']} is incompatible with engine version {VERSION}"
+            )
         return row
 
     def _classical_active(self) -> bool:

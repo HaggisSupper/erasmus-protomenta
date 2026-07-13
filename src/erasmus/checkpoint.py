@@ -1,10 +1,9 @@
 """Compact resume-checkpoint model for the Erasmus cognitive frontier.
 
 A :class:`Checkpoint` captures the full resumable state at a moment in time.
-All fields that reference propositions or evidence are plain text that can be
-inspected without model assistance (10th-Man requirement).  Source event ids
-link the checkpoint back to the append-only event log so the checkpoint is
-auditable rather than a lossy opaque summary.
+Human-readable frontier fields remain plain text. An optional proposition id
+links to the append-only epistemic ledger without copying its history. Source
+event ids link the checkpoint back to the append-only event log.
 
 Public API
 ----------
@@ -64,6 +63,8 @@ class Checkpoint:
         Ids of events in the ``events`` table that this checkpoint
         synthesises.  Preserves provenance without relying on generated
         text as a sole record.
+    proposition_id
+        Optional stable reference to the active epistemic-ledger proposition.
     """
 
     frontier: str
@@ -76,6 +77,7 @@ class Checkpoint:
     pending_leap: str | None = None
     relevant_tangible_wrongness: str | None = None
     source_event_ids: list[int] = field(default_factory=list)
+    proposition_id: int | None = None
 
 
 def _validate(cp: "Checkpoint", store: "Store") -> None:
@@ -113,6 +115,10 @@ def _validate(cp: "Checkpoint", store: "Store") -> None:
         raise ValueError(
             f"source_event_ids references event ids that do not exist: {sorted(missing)}"
         )
+    if cp.proposition_id is not None and store.db.execute(
+        "SELECT 1 FROM propositions WHERE id = ?", (cp.proposition_id,)
+    ).fetchone() is None:
+        raise ValueError(f"proposition_id does not exist: {cp.proposition_id}")
 
 
 def save_checkpoint(store: "Store", cp: Checkpoint) -> int:
@@ -131,8 +137,8 @@ def save_checkpoint(store: "Store", cp: Checkpoint) -> int:
                 frontier, proposition, strongest_support,
                 strongest_contradiction, unresolved_tension,
                 active_mode, next_move, pending_leap,
-                relevant_tangible_wrongness, source_event_ids
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                relevant_tangible_wrongness, source_event_ids, proposition_id
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 cp.frontier,
@@ -145,6 +151,7 @@ def save_checkpoint(store: "Store", cp: Checkpoint) -> int:
                 cp.pending_leap,
                 cp.relevant_tangible_wrongness,
                 json.dumps(cp.source_event_ids),
+                cp.proposition_id,
             ),
         )
     return int(cur.lastrowid)
@@ -161,7 +168,7 @@ def load_latest_checkpoint(store: "Store") -> Checkpoint | None:
         SELECT frontier, proposition, strongest_support,
                strongest_contradiction, unresolved_tension,
                active_mode, next_move, pending_leap,
-               relevant_tangible_wrongness, source_event_ids
+               relevant_tangible_wrongness, source_event_ids, proposition_id
         FROM   checkpoints
         ORDER  BY id DESC
         LIMIT  1
@@ -180,4 +187,5 @@ def load_latest_checkpoint(store: "Store") -> Checkpoint | None:
         pending_leap=row["pending_leap"],
         relevant_tangible_wrongness=row["relevant_tangible_wrongness"],
         source_event_ids=json.loads(row["source_event_ids"] or "[]"),
+        proposition_id=row["proposition_id"],
     )

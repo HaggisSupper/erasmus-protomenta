@@ -20,6 +20,9 @@ The system combines bounded conversational continuity, deterministic-first capab
 - `erasmus mission-create --title "..." --objective "..."`
 - `erasmus sleep` — consolidate events into experience candidates (idempotent)
 - `erasmus checkpoint` — JSON-dump the latest committed checkpoint
+- `erasmus ledger-evidence-add ...` — append provenance-bearing evidence
+- `erasmus ledger-propose ...` / `ledger-transition ...` — make explicit belief changes
+- `erasmus ledger-inspect <id>` / `ledger-query <id>` — inspect history and evidence
 - `erasmus integrity` — run `PRAGMA integrity_check`
 - `erasmus backup <dest>` — hot-backup the database to a file
 - `erasmus restore <src>` — restore from a backup file

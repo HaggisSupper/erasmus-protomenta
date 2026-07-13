@@ -28,12 +28,14 @@ erasmus --db state\erasmus.db status
 # {
 #   "events": 0,
 #   "propositions": 0,
+#   "epistemic_evidence": 0,
+#   "proposition_transitions": 0,
 #   "missions": 0,
 #   "experience_candidates": 0,
 #   "immune_state": 0,
 #   "checkpoints": 0,
 #   "sessions": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9]
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 # }
 ```
 
@@ -276,3 +278,32 @@ python -m pytest tests\test_missions.py -v
 append-only approval requests. `mission-pause`, `mission-resume`,
 `mission-cancel`, and `mission-rollback` apply only declared deterministic state
 transitions; uncertain interrupted side effects fail closed.
+
+## Epistemic ledger verification
+
+Evidence insertion and proposition changes are separate commands. Retrieval,
+model repetition, and confidence scores never change proposition status by
+themselves.
+
+```powershell
+$db = "state\epistemic-ledger.db"
+erasmus --db $db init
+
+$evidence = erasmus --db $db ledger-evidence-add "registered observation" `
+  --type evidence --source-kind observation `
+  --provenance '{"source":"instrument-7","sample":"A"}' `
+  --trust primary --effective-date 2026-07-13 --scope lab `
+  --actor operator --authority evidence:write | ConvertFrom-Json
+
+$claim = erasmus --db $db ledger-propose "Treatment A changes outcome B" `
+  $evidence.evidence_id --scope lab --actor operator `
+  --authority ledger:write | ConvertFrom-Json
+
+erasmus --db $db ledger-inspect $claim.proposition_id
+erasmus --db $db ledger-query $claim.proposition_id
+python -m pytest tests\test_ledger.py -v
+```
+
+Rollback is a code rollback plus database restore from the pre-migration
+backup. Migration 10 is intentionally forward-only because its records are
+append-only; do not drop ledger tables from a live database.

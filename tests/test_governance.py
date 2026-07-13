@@ -677,12 +677,12 @@ class TestImmutableContract:
     _CONTRACT = _ROOT / "constitution" / "immutable-contract.md"
 
     def test_canonical_governance_paths_use_exact_case(self):
-        assert "immutable-contract.md" in {
+        constitution_files = {
             path.name for path in (self._ROOT / "constitution").iterdir()
         }
-        assert "architecture.md" in {
-            path.name for path in (self._ROOT / "docs").iterdir()
-        }
+        docs_files = {path.name for path in (self._ROOT / "docs").iterdir()}
+        assert "immutable-contract.md" in constitution_files, constitution_files
+        assert "architecture.md" in docs_files, docs_files
 
     def test_required_immutable_invariants_are_present(self):
         content = self._CONTRACT.read_text(encoding="utf-8")

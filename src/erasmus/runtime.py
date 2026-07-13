@@ -85,13 +85,16 @@ class LocalRuntimeConfig:
         if raw.get("version", "1.0.0") != "1.0.0":
             raise RuntimeConfigurationError("runtime configuration version must be 1.0.0")
         try:
+            section_budgets = raw.get("section_budgets", DEFAULT_SECTION_BUDGETS)
+            if isinstance(section_budgets, Mapping):
+                section_budgets = dict(section_budgets)
             config = cls(
                 base_url=raw["base_url"],
                 model=raw["model"],
                 runtime_kind=raw.get("runtime_kind", "mistral_rs"),
                 timeout_seconds=raw.get("timeout_seconds", 120.0),
                 context_budget=raw.get("context_budget", 4096),
-                section_budgets=raw.get("section_budgets", DEFAULT_SECTION_BUDGETS),
+                section_budgets=section_budgets,
                 adapter=raw.get("adapter"),
                 supports_embeddings=raw.get("supports_embeddings", False),
             )
@@ -133,8 +136,8 @@ class LocalRuntimeConfig:
                 f"section budgets must contain non-negative integers for {sorted(expected)}"
             )
         if sum(self.section_budgets.values()) < self.context_budget:
-            # ponytail: section totals may exceed the global cap; a tokenizer contract
-            # replaces whitespace counting if exact model tokens become necessary.
+            # Section totals may exceed the global cap; a tokenizer contract replaces
+            # whitespace counting if exact model tokens become necessary.
             raise RuntimeConfigurationError("section budgets must cover context_budget")
         if self.adapter is not None and (
             not isinstance(self.adapter, str) or not self.adapter.strip()
@@ -371,7 +374,7 @@ def run_session(
         }
         with store.db:
             event = store.db.execute(
-                "INSERT INTO events(kind, payload) VALUES('model_response', ?)",
+                "INSERT INTO events(kind, payload) VALUES('erasmus_output', ?)",
                 (_json(event_payload),),
             )
             event_id = int(event.lastrowid)

@@ -179,6 +179,14 @@ def test_stream_accepts_standard_sse_metadata(endpoint):
 
 
 def test_configuration_validation_fails_closed():
+    first = LocalRuntimeConfig.from_mapping(
+        {"base_url": "http://localhost:1", "model": "x"}
+    )
+    second = LocalRuntimeConfig.from_mapping(
+        {"base_url": "http://localhost:1", "model": "x"}
+    )
+    first.section_budgets["evidence"] = 0
+    assert second.section_budgets["evidence"] == 1200
     with pytest.raises(RuntimeConfigurationError, match="absolute HTTP"):
         LocalRuntimeConfig.from_mapping({"base_url": "not-a-url", "model": "x"})
     with pytest.raises(RuntimeConfigurationError, match="unknown runtime"):
@@ -250,6 +258,23 @@ def test_untrusted_retrieval_never_enters_system_authority(tmp_path):
     assert evidence_section.authority == "untrusted_evidence"
 
 
+def test_truncated_evidence_only_records_included_source_refs(tmp_path):
+    budgets = _budgets(40)
+    budgets.update(
+        constitution=2, checkpoint=0, propositions=0, adaptations=0,
+        evidence=2, dialogue=0,
+    )
+    context = assemble_context(
+        _store(tmp_path), constitution="constitution", prompt_artifact="prompt",
+        budgets=budgets,
+        retrieved_evidence=[
+            {"source_ref": "doc:included", "content": "first evidence"},
+            {"source_ref": "doc:omitted", "content": "second evidence"},
+        ],
+    )
+    assert context.retrieved_refs == ("doc:included",)
+
+
 def test_existing_sqlite_fts_retrieval_preserves_row_reference(tmp_path):
     database = tmp_path / "rag.db"
     connection = sqlite3.connect(database)
@@ -287,8 +312,9 @@ def test_session_journals_identity_context_response_and_source_refs(tmp_path, en
     assert session["model"] == "model-a"
     assert session["adapter"] == "adapter-a"
     event = store.db.execute(
-        "SELECT payload FROM events WHERE id = ?", (result["response_event_id"],)
+        "SELECT kind, payload FROM events WHERE id = ?", (result["response_event_id"],)
     ).fetchone()
+    assert event["kind"] == "erasmus_output"
     assert json.loads(event["payload"])["retrieved_source_refs"] == ["doc:7"]
     assert store.db.execute("SELECT COUNT(*) FROM runtime_identity_changes").fetchone()[0] == 1
     assert server.requests

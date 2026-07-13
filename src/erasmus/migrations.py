@@ -810,12 +810,6 @@ MIGRATIONS: list[tuple[int, str]] = [
         # Local OpenAI-compatible session identity, bounded context evidence,
         # and runtime/model/adapter change history.
         """
-        CREATE TABLE IF NOT EXISTS events(
-            id INTEGER PRIMARY KEY,
-            ts TEXT DEFAULT CURRENT_TIMESTAMP,
-            kind TEXT NOT NULL,
-            payload TEXT NOT NULL
-        );
         CREATE TABLE local_runtime_sessions(
             id INTEGER PRIMARY KEY,
             endpoint TEXT NOT NULL,

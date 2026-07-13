@@ -61,8 +61,8 @@ erasmus --db $db runtime-validate $config
 erasmus --db $db runtime-discover $config
 erasmus --db $db runtime-smoke $config --prompt "Summarise the active context."
 
-# Optional, only when discovery advertises embedding support and the config
-# explicitly sets supports_embeddings to true.
+# Optional, only when discovery advertises embedding support. The local
+# supports_embeddings setting is the pre-discovery capability default.
 erasmus --db $db runtime-embed $config "bounded local evidence"
 
 python -m pytest tests\test_local_runtime.py -v

@@ -158,6 +158,18 @@ def assemble_context(
         tokens = raw_sections[name].split()
         take = min(len(tokens), budgets[name], remaining)
         included = " ".join(tokens[:take])
+        source_refs: tuple[str, ...] = ()
+        if name == "evidence" and take:
+            tokens_left = take
+            included_refs = []
+            for line, source_ref in zip(evidence_lines, evidence_refs, strict=True):
+                line_tokens = len(line.split())
+                if tokens_left <= 0:
+                    break
+                if line_tokens:
+                    included_refs.append(source_ref)
+                    tokens_left -= line_tokens
+            source_refs = tuple(included_refs)
         sections.append(
             ContextSection(
                 name=name,
@@ -165,7 +177,7 @@ def assemble_context(
                 content=included,
                 included_tokens=take,
                 omitted_tokens=len(tokens) - take,
-                source_refs=tuple(evidence_refs) if name == "evidence" and take else (),
+                source_refs=source_refs,
             )
         )
         remaining -= take

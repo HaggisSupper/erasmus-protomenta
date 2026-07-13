@@ -33,7 +33,7 @@ erasmus --db state\erasmus.db status
 #   "immune_state": 0,
 #   "checkpoints": 0,
 #   "sessions": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8]
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9]
 # }
 ```
 
@@ -239,3 +239,40 @@ Reference handlers cover Draft 2020-12 JSON Schema validation, SHA-256 hashing
 of text or files inside configured roots, and bounded read-only SQLite FTS
 queries. External handlers exchange canonical JSON over standard input/output
 and return typed timeout, exit-code, and output-validation failures.
+
+## Bounded mission verification
+
+```powershell
+$db = "state\mission-engine.db"
+erasmus --db $db init
+erasmus --db $db graph-import "capabilities\okf\pr-governance"
+
+# Explicitly configure and advance the reviewed reference implementation.
+@'
+from erasmus.capability_runtime import CapabilityRuntime, validate_json_schema
+from erasmus.store import Store
+
+store = Store("state/mission-engine.db")
+store.init()
+runtime = CapabilityRuntime(store)
+runtime.configure(
+    "validate_json_schema", "1.0.0",
+    "jsonschema_validator", "1.0.0", validate_json_schema,
+)
+for state in ("implemented", "isolated_test", "adversarial_review", "approved", "active"):
+    runtime.transition("validate_json_schema", "1.0.0", state)
+'@ | python -
+
+$mission = erasmus --db $db mission-create --contract "contracts\fixtures\valid_mission.json"
+erasmus --db $db mission-inspect $mission
+erasmus --db $db mission-authorize $mission --actor Protomentat --evidence "approval:manual"
+erasmus --db $db mission-run-one $mission
+erasmus --db $db mission-inspect $mission
+
+python -m pytest tests\test_missions.py -v
+```
+
+`mission-run-one` never loops. Authority expansion and irreversible steps create
+append-only approval requests. `mission-pause`, `mission-resume`,
+`mission-cancel`, and `mission-rollback` apply only declared deterministic state
+transitions; uncertain interrupted side effects fail closed.

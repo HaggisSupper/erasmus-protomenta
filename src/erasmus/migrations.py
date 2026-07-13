@@ -370,6 +370,81 @@ MIGRATIONS: list[tuple[int, str]] = [
         END;
         """,
     ),
+    (
+        9,
+        # Versioned bounded missions, durable step progress, human approvals,
+        # and append-only transition history.
+        """
+        CREATE TABLE IF NOT EXISTS missions(
+            id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            success_condition TEXT NOT NULL,
+            risk REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'proposed',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        ALTER TABLE missions ADD COLUMN contract_version TEXT;
+        ALTER TABLE missions ADD COLUMN contract_json TEXT;
+        ALTER TABLE missions ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+        CREATE TABLE mission_steps (
+            mission_id INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            step_id TEXT NOT NULL,
+            request_json TEXT NOT NULL,
+            rollback_json TEXT,
+            irreversible INTEGER NOT NULL CHECK(irreversible IN (0, 1)),
+            status TEXT NOT NULL CHECK(status IN (
+                'pending', 'running', 'completed', 'failed', 'uncertain',
+                'rollback_running', 'rolled_back'
+            )),
+            invocation_id TEXT,
+            result_json TEXT,
+            PRIMARY KEY(mission_id, position),
+            UNIQUE(mission_id, step_id),
+            FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE CASCADE
+        );
+        CREATE TABLE mission_transitions (
+            id INTEGER PRIMARY KEY,
+            mission_id INTEGER NOT NULL,
+            from_state TEXT,
+            to_state TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE CASCADE
+        );
+        CREATE TABLE mission_approvals (
+            id INTEGER PRIMARY KEY,
+            mission_id INTEGER NOT NULL,
+            request_key TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN (
+                'initial_authorization', 'authority_expansion', 'irreversible_action'
+            )),
+            decision TEXT NOT NULL CHECK(decision IN ('requested', 'approved', 'denied')),
+            detail_json TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE CASCADE
+        );
+        CREATE TRIGGER mission_transitions_no_update
+        BEFORE UPDATE ON mission_transitions BEGIN
+            SELECT RAISE(ABORT, 'mission transitions are append-only');
+        END;
+        CREATE TRIGGER mission_transitions_no_delete
+        BEFORE DELETE ON mission_transitions BEGIN
+            SELECT RAISE(ABORT, 'mission transitions are append-only');
+        END;
+        CREATE TRIGGER mission_approvals_no_update
+        BEFORE UPDATE ON mission_approvals BEGIN
+            SELECT RAISE(ABORT, 'mission approvals are append-only');
+        END;
+        CREATE TRIGGER mission_approvals_no_delete
+        BEFORE DELETE ON mission_approvals BEGIN
+            SELECT RAISE(ABORT, 'mission approvals are append-only');
+        END;
+        """,
+    ),
 ]
 
 

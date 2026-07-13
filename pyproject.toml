@@ -7,7 +7,9 @@ name = "erasmus-protomenta"
 version = "0.2.0"
 description = "Persistent dyadic cognitive kernel with deterministic-first capability routing and cognitive immunity"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "jsonschema>=4.10.0,<5",
+]
 
 [project.scripts]
 erasmus = "erasmus.cli.main:main"

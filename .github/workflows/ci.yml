@@ -34,3 +34,10 @@ jobs:
 
       - name: Run tests
         run: python -m pytest tests/ -v
+
+      - name: Validate task contracts (governance control plane)
+        run: |
+          python scripts/validate_contract.py contracts/fixtures/valid_task.json
+        env:
+          PYTHONPATH: src
+

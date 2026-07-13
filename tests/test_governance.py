@@ -670,3 +670,44 @@ class TestWindowsPowerShellScript:
         assert cli.exists(), (
             f"Python CLI validation script not found at {cli}"
         )
+
+
+class TestImmutableContract:
+    _ROOT = Path(__file__).parent.parent
+    _CONTRACT = _ROOT / "constitution" / "immutable-contract.md"
+
+    def test_canonical_governance_paths_use_exact_case(self):
+        constitution_files = {
+            path.name for path in (self._ROOT / "constitution").iterdir()
+        }
+        docs_files = {path.name for path in (self._ROOT / "docs").iterdir()}
+        contract_matches = {
+            name for name in constitution_files
+            if name.casefold() == "immutable-contract.md"
+        }
+        architecture_matches = {
+            name for name in docs_files if name.casefold() == "architecture.md"
+        }
+        assert contract_matches == {"immutable-contract.md"}, constitution_files
+        assert architecture_matches == {"architecture.md"}, docs_files
+
+    def test_required_immutable_invariants_are_present(self):
+        assert self._CONTRACT.is_file(), f"missing immutable contract: {self._CONTRACT}"
+        content = self._CONTRACT.read_text(encoding="utf-8")
+        required = (
+            "## Epistemic integrity",
+            "## Authority and dissent",
+            "## Persistence and promotion",
+            "## Capability and operation",
+            "## Provenance and reversibility",
+            "Evidence outranks confidence and agreement.",
+            "The Protomentat retains final authority over consequential ambiguity.",
+            "Only the Protomentat may authorize irreversible or materially consequential execution",
+            "remain logically separate",
+            "Every capability declares typed input and output",
+            "one process and one SQLite database",
+            "Windows-first operation is required. No Docker.",
+            "independent dissent, provenance, or human sovereignty",
+        )
+        missing = [clause for clause in required if clause not in content]
+        assert not missing, f"immutable contract is missing required clauses: {missing}"

@@ -324,12 +324,67 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE capability_evidence_v7 RENAME TO capability_evidence
         """,
     ),
+    (
+        8,
+        # Runtime lifecycle state and immutable invocation evidence. Runtime
+        # configuration remains local; this is not a second tool registry.
+        """
+        CREATE TABLE capability_runtime_state (
+            capability_id TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            implementation_id TEXT NOT NULL,
+            implementation_version TEXT NOT NULL,
+            lifecycle TEXT NOT NULL CHECK (
+                lifecycle IN (
+                    'proposed', 'implemented', 'isolated_test', 'adversarial_review',
+                    'approved', 'active', 'suspended', 'retired'
+                )
+            ),
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (capability_id, capability_version)
+        );
+        CREATE TABLE capability_invocations (
+            invocation_id TEXT PRIMARY KEY,
+            capability_id TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            implementation_id TEXT,
+            implementation_version TEXT,
+            request_json TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('success', 'failure')),
+            started_at TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+            provenance_json TEXT NOT NULL,
+            side_effects_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL
+        );
+        CREATE TRIGGER capability_invocations_no_update
+        BEFORE UPDATE ON capability_invocations
+        BEGIN
+            SELECT RAISE(ABORT, 'capability invocations are append-only');
+        END;
+        CREATE TRIGGER capability_invocations_no_delete
+        BEFORE DELETE ON capability_invocations
+        BEGIN
+            SELECT RAISE(ABORT, 'capability invocations are append-only');
+        END;
+        """,
+    ),
 ]
 
 
 def _split_statements(sql: str) -> list[str]:
-    """Split a semicolon-delimited SQL string into individual statements."""
-    return [s.strip() for s in sql.split(";") if s.strip()]
+    """Split SQL while preserving compound statements such as triggers."""
+    statements: list[str] = []
+    pending = ""
+    for line in sql.splitlines():
+        pending += line + "\n"
+        if sqlite3.complete_statement(pending):
+            statements.append(pending.strip())
+            pending = ""
+    if pending.strip():
+        statements.append(pending.strip())
+    return statements
 
 
 def apply_migrations(db: sqlite3.Connection) -> list[int]:

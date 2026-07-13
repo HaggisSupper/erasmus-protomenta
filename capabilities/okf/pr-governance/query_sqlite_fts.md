@@ -1,0 +1,7 @@
+---
+{"type":"Erasmus Capability","title":"Query SQLite FTS","description":"Run a bounded read-only MATCH query against a configured SQLite FTS table.","tags":["capability","deterministic","sqlite","fts"],"okf_version":"0.1","contract":{"id":"query_sqlite_fts","version":"1.0.0","purpose":"Run a bounded read-only MATCH query against a configured SQLite FTS table.","classification":"deterministic","goals":["query_sqlite_fts"],"inputs":[{"name":"database","schema":{"type":"string","minLength":1}},{"name":"table","schema":{"type":"string","pattern":"^[A-Za-z_][A-Za-z0-9_]*$"}},{"name":"query","schema":{"type":"string","minLength":1}},{"name":"limit","schema":{"type":"integer","minimum":1,"maximum":100}}],"outputs":[{"name":"rows","schema":{"type":"array","items":{"type":"object"}}}],"authority_required":["database:read"],"side_effects":[],"provenance_requirements":["caller","request_id"],"failure_behavior":"Fail closed on invalid identifiers, inaccessible databases, or paths outside configured roots.","rollback_behavior":null,"cost":{"units":"rows","budget":100},"required_evidence":["database","query","row_count"],"allowed_implementations":["sqlite_fts_reader"],"tenth_man_triggers":["query_scope_is_ambiguous"]},"implementation":{"id":"sqlite_fts_reader","version":"1.0.0","capability_id":"query_sqlite_fts","capability_version":"1.0.0"},"relationships":[]}
+---
+
+# Rollback
+
+The connection is read-only and no state is changed.

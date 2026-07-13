@@ -33,7 +33,7 @@ erasmus --db state\erasmus.db status
 #   "immune_state": 0,
 #   "checkpoints": 0,
 #   "sessions": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7]
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8]
 # }
 ```
 
@@ -223,3 +223,19 @@ python -m pytest tests\test_tool_registry.py -v
 Never place the private signing key in the repository, SQLite registry, cache,
 environment logs, or `TOOLCHAIN.md`. A signature verifies publisher possession;
 it does not grant capability authority.
+
+## Capability runtime verification
+
+The runtime dispatches only implementations explicitly configured by the local
+process. A contract must advance through every lifecycle gate before invocation;
+all successful and rejected requests are recorded in the append-only invocation
+ledger.
+
+```powershell
+python -m pytest tests\test_capability_runtime.py -v
+```
+
+Reference handlers cover Draft 2020-12 JSON Schema validation, SHA-256 hashing
+of text or files inside configured roots, and bounded read-only SQLite FTS
+queries. External handlers exchange canonical JSON over standard input/output
+and return typed timeout, exit-code, and output-validation failures.

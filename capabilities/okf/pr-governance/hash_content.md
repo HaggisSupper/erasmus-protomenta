@@ -1,0 +1,7 @@
+---
+{"type":"Erasmus Capability","title":"Hash content","description":"Calculate a SHA-256 digest for UTF-8 text or a file inside configured roots.","tags":["capability","deterministic","hashing"],"okf_version":"0.1","contract":{"id":"hash_content","version":"1.0.0","purpose":"Calculate a SHA-256 digest for UTF-8 text or a file inside configured roots.","classification":"deterministic","goals":["hash_content"],"inputs":[{"name":"source","schema":{"oneOf":[{"type":"object","required":["text"],"properties":{"text":{"type":"string"}},"additionalProperties":false},{"type":"object","required":["path"],"properties":{"path":{"type":"string","minLength":1}},"additionalProperties":false}]}}],"outputs":[{"name":"algorithm","schema":{"const":"sha256"}},{"name":"digest","schema":{"type":"string","pattern":"^[0-9a-f]{64}$"}}],"authority_required":["content:hash","file:read"],"side_effects":[],"provenance_requirements":["caller","request_id"],"failure_behavior":"Fail closed when a file is missing or outside configured roots.","rollback_behavior":null,"cost":{"units":"bytes","budget":1073741824},"required_evidence":["source_kind","digest"],"allowed_implementations":["sha256_hasher"],"tenth_man_triggers":["content_origin_is_ambiguous"]},"implementation":{"id":"sha256_hasher","version":"1.0.0","capability_id":"hash_content","capability_version":"1.0.0"},"relationships":[]}
+---
+
+# Rollback
+
+No state is changed.

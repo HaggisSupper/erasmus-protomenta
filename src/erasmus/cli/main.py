@@ -23,7 +23,7 @@ from erasmus.immune import ImmuneCascade
 from erasmus.ledger import EpistemicLedger
 from erasmus.missions import MissionEngine, create_mission
 from erasmus.review import tenth_man_prompt
-from erasmus.sleep import consolidate
+from erasmus.sleep import consolidate, decide_candidate, sleep_report
 from erasmus.store import Store
 from erasmus.tool_registry import (
     ToolRegistry,
@@ -41,6 +41,16 @@ def main() -> None:
     sub.add_parser("init")
     sub.add_parser("status")
     sub.add_parser("sleep")
+    sleep_report_cmd = sub.add_parser("sleep-report")
+    sleep_report_cmd.add_argument("run_id", type=int)
+    sleep_decide = sub.add_parser("sleep-decide")
+    sleep_decide.add_argument("candidate_id", type=int)
+    sleep_decide.add_argument("decision", choices=("approved", "rejected"))
+    sleep_decide.add_argument("target", choices=("belief", "skill"))
+    sleep_decide.add_argument("evidence_id", type=int)
+    sleep_decide.add_argument("--actor", required=True)
+    sleep_decide.add_argument("--authority", required=True)
+    sleep_decide.add_argument("--reason", required=True)
     sub.add_parser("checkpoint")
     sub.add_parser("integrity")
 
@@ -214,6 +224,9 @@ def main() -> None:
             "proposition_transitions",
             "missions",
             "experience_candidates",
+            "sleep_runs",
+            "sleep_items",
+            "sleep_candidates",
             "immune_state",
             "immune_incidents",
             "immune_findings",
@@ -242,6 +255,16 @@ def main() -> None:
 
     elif args.cmd == "sleep":
         print(json.dumps(consolidate(store), indent=2))
+
+    elif args.cmd == "sleep-report":
+        print(json.dumps(sleep_report(store, args.run_id), indent=2))
+
+    elif args.cmd == "sleep-decide":
+        promotion_id = decide_candidate(
+            store, args.candidate_id, args.decision, args.target, args.evidence_id,
+            args.actor, args.authority, args.reason,
+        )
+        print(json.dumps({"promotion_id": promotion_id}, indent=2))
 
     elif args.cmd == "checkpoint":
         cp = load_latest_checkpoint(store)

@@ -19,6 +19,8 @@ The system combines bounded conversational continuity, deterministic-first capab
 - `erasmus status` — table row counts and applied schema versions
 - `erasmus mission-create --title "..." --objective "..."`
 - `erasmus sleep` — consolidate events into experience candidates (idempotent)
+- `erasmus sleep-report <run-id>` — inspect classifications, reasons, and stage history
+- `erasmus sleep-decide ...` — record an evidence-backed belief or skill decision
 - `erasmus checkpoint` — JSON-dump the latest committed checkpoint
 - `erasmus ledger-evidence-add ...` — append provenance-bearing evidence
 - `erasmus ledger-propose ...` / `ledger-transition ...` — make explicit belief changes

@@ -32,12 +32,15 @@ erasmus --db state\erasmus.db status
 #   "proposition_transitions": 0,
 #   "missions": 0,
 #   "experience_candidates": 0,
+#   "sleep_runs": 0,
+#   "sleep_items": 0,
+#   "sleep_candidates": 0,
 #   "immune_state": 0,
 #   "immune_incidents": 0,
 #   "immune_findings": 0,
 #   "checkpoints": 0,
 #   "sessions": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 # }
 ```
 
@@ -59,17 +62,32 @@ erasmus --db state\erasmus.db checkpoint
 # checkpoint as a JSON object with all frontier fields and source_event_ids.
 ```
 
-## Run sleep consolidation (idempotent — safe to run repeatedly)
+## Run sleep consolidation (recoverable and idempotent)
 
 ```powershell
 erasmus --db state\erasmus.db sleep
-# Example output after two correction events have been added:
-# {
-#   "events": 2,
-#   "experience_candidates": 2,
-#   "last_event_id": 2
-# }
+# Output includes the run id, stage history, disposition counts, source-event
+# links, candidate provenance, and reasons. Re-running with no new events
+# returns zero events and creates no duplicate durable effects.
 ```
+
+To inspect a prior run or record an explicit evidence-backed decision:
+
+```powershell
+erasmus --db state\erasmus.db sleep-report 1
+
+# This records approval only; it does not mutate the canonical ledger or train
+# an adapter. candidate 3 must be a proposition_change and evidence 7 must
+# already exist in the epistemic ledger.
+erasmus --db state\erasmus.db sleep-decide 3 approved belief 7 `
+  --actor reviewer --authority sleep:promote `
+  --reason "independent evidence and scope reviewed"
+```
+
+Source events are never deleted. External and Erasmus-authored content is
+quarantined; behavioral lessons remain deferred; proposition decisions require
+ledger evidence plus `sleep:promote` authority. A failed run retains its stage
+and classified items, then safely resumes from the same run id.
 
 ## Backup and restore
 

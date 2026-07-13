@@ -684,6 +684,127 @@ MIGRATIONS: list[tuple[int, str]] = [
         END;
         """,
     ),
+    (
+        12,
+        # Recoverable, versioned sleep consolidation with one classification
+        # per source event and explicit, append-only promotion decisions.
+        """
+        CREATE TABLE IF NOT EXISTS experience_candidates(
+            id INTEGER PRIMARY KEY,
+            lesson TEXT NOT NULL,
+            evidence_count INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'candidate',
+            created_at TEXT NOT NULL DEFAULT ''
+        );
+        ALTER TABLE experience_candidates ADD COLUMN source_event_id INTEGER
+            REFERENCES events(id);
+        CREATE UNIQUE INDEX experience_candidates_source_event
+            ON experience_candidates(source_event_id) WHERE source_event_id IS NOT NULL;
+        CREATE TABLE sleep_runs(
+            id INTEGER PRIMARY KEY,
+            version TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('running', 'failed', 'completed')),
+            current_stage TEXT NOT NULL,
+            start_event_id INTEGER NOT NULL,
+            end_event_id INTEGER NOT NULL,
+            failure_reason TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT
+        );
+        CREATE TABLE sleep_run_stages(
+            id INTEGER PRIMARY KEY,
+            run_id INTEGER NOT NULL,
+            stage TEXT NOT NULL CHECK(stage IN (
+                'quarantine', 'extract', 'reconcile', 'validate',
+                'promote_defer', 'checkpoint', 'failed'
+            )),
+            detail_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(run_id) REFERENCES sleep_runs(id)
+        );
+        CREATE TABLE sleep_items(
+            id INTEGER PRIMARY KEY,
+            run_id INTEGER NOT NULL,
+            event_id INTEGER NOT NULL UNIQUE,
+            source_class TEXT NOT NULL CHECK(source_class IN (
+                'protomentat', 'erasmus', 'tool', 'external',
+                'deterministic', 'reviewer', 'unknown'
+            )),
+            candidate_type TEXT CHECK(candidate_type IS NULL OR candidate_type IN (
+                'rag_insert', 'proposition_change', 'tangible_wrongness',
+                'behavioral_lesson', 'immune_signature'
+            )),
+            disposition TEXT NOT NULL CHECK(disposition IN (
+                'accepted', 'deferred', 'quarantined', 'rejected', 'discarded'
+            )),
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(run_id) REFERENCES sleep_runs(id),
+            FOREIGN KEY(event_id) REFERENCES events(id)
+        );
+        CREATE TABLE sleep_candidates(
+            id INTEGER PRIMARY KEY,
+            event_id INTEGER NOT NULL UNIQUE,
+            candidate_type TEXT NOT NULL CHECK(candidate_type IN (
+                'rag_insert', 'proposition_change', 'tangible_wrongness',
+                'behavioral_lesson', 'immune_signature'
+            )),
+            content TEXT NOT NULL,
+            provenance_json TEXT NOT NULL,
+            initial_disposition TEXT NOT NULL CHECK(initial_disposition IN (
+                'accepted', 'deferred', 'quarantined', 'rejected'
+            )),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(event_id) REFERENCES events(id)
+        );
+        CREATE TABLE sleep_promotions(
+            id INTEGER PRIMARY KEY,
+            candidate_id INTEGER NOT NULL,
+            decision TEXT NOT NULL CHECK(decision IN ('approved', 'rejected')),
+            target TEXT NOT NULL CHECK(target IN ('belief', 'skill')),
+            evidence_id INTEGER NOT NULL,
+            actor TEXT NOT NULL,
+            authority TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(candidate_id, target),
+            FOREIGN KEY(candidate_id) REFERENCES sleep_candidates(id),
+            FOREIGN KEY(evidence_id) REFERENCES epistemic_evidence(id)
+        );
+        CREATE TRIGGER sleep_run_stages_no_update
+        BEFORE UPDATE ON sleep_run_stages BEGIN
+            SELECT RAISE(ABORT, 'sleep run stages are append-only');
+        END;
+        CREATE TRIGGER sleep_run_stages_no_delete
+        BEFORE DELETE ON sleep_run_stages BEGIN
+            SELECT RAISE(ABORT, 'sleep run stages are append-only');
+        END;
+        CREATE TRIGGER sleep_items_no_update
+        BEFORE UPDATE ON sleep_items BEGIN
+            SELECT RAISE(ABORT, 'sleep items are append-only');
+        END;
+        CREATE TRIGGER sleep_items_no_delete
+        BEFORE DELETE ON sleep_items BEGIN
+            SELECT RAISE(ABORT, 'sleep items are append-only');
+        END;
+        CREATE TRIGGER sleep_candidates_no_update
+        BEFORE UPDATE ON sleep_candidates BEGIN
+            SELECT RAISE(ABORT, 'sleep candidates are append-only');
+        END;
+        CREATE TRIGGER sleep_candidates_no_delete
+        BEFORE DELETE ON sleep_candidates BEGIN
+            SELECT RAISE(ABORT, 'sleep candidates are append-only');
+        END;
+        CREATE TRIGGER sleep_promotions_no_update
+        BEFORE UPDATE ON sleep_promotions BEGIN
+            SELECT RAISE(ABORT, 'sleep promotions are append-only');
+        END;
+        CREATE TRIGGER sleep_promotions_no_delete
+        BEFORE DELETE ON sleep_promotions BEGIN
+            SELECT RAISE(ABORT, 'sleep promotions are append-only');
+        END;
+        """,
+    ),
 ]
 
 

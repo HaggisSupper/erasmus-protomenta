@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "base_url": "http://127.0.0.1:1234/v1",
+  "runtime_kind": "mistral_rs",
+  "model": "local-model",
+  "timeout_seconds": 120,
+  "context_budget": 4096,
+  "section_budgets": {
+    "constitution": 800,
+    "checkpoint": 400,
+    "propositions": 700,
+    "adaptations": 400,
+    "evidence": 1200,
+    "dialogue": 596
+  },
+  "adapter": null,
+  "supports_embeddings": false
+}

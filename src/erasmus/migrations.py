@@ -805,6 +805,47 @@ MIGRATIONS: list[tuple[int, str]] = [
         END;
         """,
     ),
+    (
+        13,
+        # Local OpenAI-compatible session identity, bounded context evidence,
+        # and runtime/model/adapter change history.
+        """
+        CREATE TABLE local_runtime_sessions(
+            id INTEGER PRIMARY KEY,
+            endpoint TEXT NOT NULL,
+            runtime_kind TEXT NOT NULL,
+            model TEXT NOT NULL,
+            adapter TEXT,
+            capabilities_json TEXT NOT NULL,
+            context_json TEXT NOT NULL,
+            retrieved_refs_json TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN (
+                'running', 'success', 'failure', 'cancelled'
+            )),
+            error_json TEXT,
+            response_event_id INTEGER,
+            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT,
+            FOREIGN KEY(response_event_id) REFERENCES events(id)
+        );
+        CREATE TABLE runtime_identity_changes(
+            id INTEGER PRIMARY KEY,
+            session_id INTEGER NOT NULL,
+            prior_json TEXT,
+            current_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(session_id) REFERENCES local_runtime_sessions(id)
+        );
+        CREATE TRIGGER runtime_identity_changes_no_update
+        BEFORE UPDATE ON runtime_identity_changes BEGIN
+            SELECT RAISE(ABORT, 'runtime identity changes are append-only');
+        END;
+        CREATE TRIGGER runtime_identity_changes_no_delete
+        BEFORE DELETE ON runtime_identity_changes BEGIN
+            SELECT RAISE(ABORT, 'runtime identity changes are append-only');
+        END;
+        """,
+    ),
 ]
 
 

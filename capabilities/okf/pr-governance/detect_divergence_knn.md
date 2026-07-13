@@ -1,0 +1,7 @@
+---
+{"type":"Erasmus Capability","title":"Detect divergence with k-NN","description":"Score a feature window with an explicitly calibrated interpretable nearest-neighbour anomaly detector.","tags":["capability","classical-ml","immune"],"okf_version":"0.1","contract":{"id":"detect_divergence_knn","version":"1.0.0","purpose":"Score a versioned feature window against a reviewed baseline using nearest-neighbour distance.","classification":"statistical","goals":["detect_divergence"],"inputs":[{"name":"features","schema":{"type":"object"}},{"name":"calibration_id","schema":{"type":"integer","minimum":1}}],"outputs":[{"name":"score","schema":{"type":"number","minimum":0}},{"name":"contributing_features","schema":{"type":"object"}}],"authority_required":["immune:inspect"],"side_effects":[],"provenance_requirements":["feature_window","calibration_id"],"failure_behavior":"Fail closed when the detector lifecycle is inactive or calibration is absent.","rollback_behavior":null,"cost":{"units":"baseline_rows","budget":1000},"required_evidence":["calibration","feature_window","score"],"allowed_implementations":["interpretable_knn_detector"],"tenth_man_triggers":["novelty_without_consequence","baseline_encodes_pathology"]},"implementation":{"id":"interpretable_knn_detector","version":"1.0.0","capability_id":"detect_divergence_knn","capability_version":"1.0.0"},"relationships":[]}
+---
+
+# Rollback
+
+Deactivate the capability lifecycle. Existing calibration and recommendation records remain append-only.

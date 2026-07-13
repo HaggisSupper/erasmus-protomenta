@@ -20,6 +20,7 @@ from erasmus.capability_runtime import (
 )
 from erasmus.checkpoint import load_latest_checkpoint
 from erasmus.context import assemble_context, retrieve_fts
+from erasmus.divergence import DivergenceEngine, extract_features
 from erasmus.immune import ImmuneCascade
 from erasmus.ledger import EpistemicLedger
 from erasmus.missions import MissionEngine, create_mission
@@ -118,6 +119,20 @@ def main() -> None:
     immune_retire.add_argument("--reason", required=True)
     immune_retire.add_argument("--actor", required=True)
     immune_retire.add_argument("--authority", required=True)
+    divergence_calibrate = sub.add_parser("divergence-calibrate")
+    divergence_calibrate.add_argument("baseline")
+    divergence_calibrate.add_argument("detector")
+    divergence_calibrate.add_argument("kind", choices=("statistical", "classical"))
+    divergence_calibrate.add_argument("threshold", type=float)
+    divergence_calibrate.add_argument("--actor", required=True)
+    divergence_calibrate.add_argument("--reason", required=True)
+    divergence_evaluate = sub.add_parser("divergence-evaluate")
+    divergence_evaluate.add_argument("fixtures")
+    divergence_evaluate.add_argument("--calibration", type=int)
+    divergence_downweight = sub.add_parser("divergence-downweight")
+    divergence_downweight.add_argument("calibration", type=int)
+    divergence_downweight.add_argument("--actor", required=True)
+    divergence_downweight.add_argument("--reason", required=True)
 
     evidence_add = sub.add_parser("ledger-evidence-add")
     evidence_add.add_argument("content")
@@ -254,6 +269,10 @@ def main() -> None:
             "checkpoints",
             "local_runtime_sessions",
             "runtime_identity_changes",
+            "divergence_windows",
+            "divergence_calibrations",
+            "divergence_recommendations",
+            "divergence_evaluations",
             "sessions",
             "capabilities",
             "capability_plans",
@@ -406,6 +425,27 @@ def main() -> None:
         cascade = ImmuneCascade(store)
         cascade.retire_agent(args.agent_id, args.reason, args.actor, args.authority)
         print(json.dumps(cascade.list_agents(), indent=2))
+
+    elif args.cmd == "divergence-calibrate":
+        windows = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
+        calibration_id = DivergenceEngine(store).calibrate(
+            args.detector, args.kind, [extract_features(window) for window in windows],
+            args.threshold, args.actor, args.reason,
+        )
+        print(json.dumps({"calibration_id": calibration_id}, indent=2))
+
+    elif args.cmd == "divergence-evaluate":
+        fixtures = json.loads(Path(args.fixtures).read_text(encoding="utf-8"))
+        metrics = DivergenceEngine(store).evaluate_fixtures(
+            fixtures, calibration_id=args.calibration
+        )
+        print(json.dumps(metrics, indent=2))
+
+    elif args.cmd == "divergence-downweight":
+        calibration_id = DivergenceEngine(store).downweight(
+            args.calibration, args.actor, args.reason
+        )
+        print(json.dumps({"calibration_id": calibration_id}, indent=2))
 
     elif args.cmd == "ledger-evidence-add":
         evidence_id = EpistemicLedger(store).add_evidence(

@@ -42,7 +42,7 @@ erasmus --db state\erasmus.db status
 #   "sessions": 0,
 #   "local_runtime_sessions": 0,
 #   "runtime_identity_changes": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 # }
 ```
 
@@ -399,3 +399,28 @@ suppresses the matching specialist while leaving the incident auditable.
 Consequential unresolved findings use the `escalate` outcome for the
 Protomentat. Rollback restores the database backup taken before migration 11;
 never delete live immune audit rows.
+
+## Divergence detector verification
+
+Mission 08 adds a versioned feature window, deterministic constitutional rules,
+robust median/MAD scoring, and one optional nearest-neighbour detector. The
+classical detector runs only when `detect_divergence_knn@1.0.0` has reached the
+existing capability registry's `active` lifecycle. Recommendations can wake or
+escalate immune review but never mutate evidence or propositions.
+
+```powershell
+python -m pytest tests\test_divergence.py -v
+
+# baseline.json is an array of event-window arrays. fixtures.json is an array
+# of objects containing label, consequence, and events.
+erasmus --db state\divergence.db divergence-calibrate baseline.json robust_mad statistical 3 `
+  --actor reviewer --reason "reviewed normal baseline"
+erasmus --db state\divergence.db divergence-evaluate fixtures.json
+```
+
+Evaluation persists precision, recall, false-positive rate, and missed
+high-consequence counts. A regulator downweights a noisy detector by appending
+a new calibration record; prior thresholds and results remain auditable.
+Low-prior novelty alone does not wake investigators without consequence or a
+risk feature. Rollback deactivates the optional capability and reverts code;
+restore the pre-migration-14 backup to remove the additive schema offline.

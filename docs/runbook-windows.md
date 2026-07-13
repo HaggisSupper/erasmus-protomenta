@@ -33,7 +33,7 @@ erasmus --db state\erasmus.db status
 #   "immune_state": 0,
 #   "checkpoints": 0,
 #   "sessions": 0,
-#   "schema_versions": [1, 2, 3]
+#   "schema_versions": [1, 2, 3, 4]
 # }
 ```
 
@@ -135,7 +135,7 @@ Remove-Item state\test_recovery.db-shm -ErrorAction SilentlyContinue
 ```powershell
 pip install pytest
 python -m pytest tests\ -v
-# All tests must pass.  As of Mission 01, there are 55 tests.
+# All tests must pass.
 ```
 
 ## Schema audit
@@ -153,3 +153,38 @@ rows = db.execute(
 print(json.dumps([dict(r) for r in rows], indent=2))
 PY
 ```
+
+## Capability graph verification
+
+The version-controlled manifest is canonical. SQLite is a rebuildable
+operational projection.
+
+```powershell
+$manifest = "capabilities\okf\pr-governance"
+$db = "state\capability_graph.db"
+
+erasmus --db $db graph-validate $manifest
+erasmus --db $db graph-import $manifest
+erasmus --db $db graph-list
+erasmus --db $db graph-inspect "merge_pull_request@1.0.0"
+erasmus --db $db graph-plan inspect_repository --authority repository:read
+erasmus --db $db graph-export "state\exported-capabilities"
+
+# The supported OKF 0.1 subset must round-trip byte-for-byte.
+$canonical = Get-ChildItem $manifest -Recurse -File | ForEach-Object {
+    [PSCustomObject]@{ Path = $_.FullName.Substring((Resolve-Path $manifest).Path.Length); Hash = (Get-FileHash $_.FullName).Hash }
+}
+$exported = Get-ChildItem "state\exported-capabilities" -Recurse -File | ForEach-Object {
+    [PSCustomObject]@{ Path = $_.FullName.Substring((Resolve-Path "state\exported-capabilities").Path.Length); Hash = (Get-FileHash $_.FullName).Hash }
+}
+if (Compare-Object $canonical $exported -Property Path, Hash) { throw "OKF round-trip drift" }
+
+python -m pytest tests\test_capability_graph.py -v
+```
+
+The canonical interchange is an OKF 0.1 Markdown bundle. Its JSON-form
+frontmatter is a valid YAML 1.2 subset and keeps parsing dependency-free.
+`merge_guarded_pull_request` intentionally returns no plan until every
+prerequisite has successful execution evidence bound to the requested exact
+head SHA. Re-importing the canonical manifest rebuilds the projection; schema
+migration rollback is the governed revert of migration 4.

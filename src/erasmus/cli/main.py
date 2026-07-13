@@ -6,6 +6,11 @@ import sqlite3
 from dataclasses import asdict
 from pathlib import Path
 
+from erasmus.capability_graph import (
+    CapabilityGraph,
+    load_manifest,
+    validate_manifest,
+)
 from erasmus.checkpoint import load_latest_checkpoint
 from erasmus.missions import create_mission
 from erasmus.review import tenth_man_prompt
@@ -39,6 +44,25 @@ def main() -> None:
     restore_cmd = sub.add_parser("restore", help="Restore the database from a backup.")
     restore_cmd.add_argument("src", help="Source backup file path.")
 
+    graph_validate = sub.add_parser("graph-validate")
+    graph_validate.add_argument("manifest")
+
+    graph_import = sub.add_parser("graph-import")
+    graph_import.add_argument("manifest")
+
+    sub.add_parser("graph-list")
+
+    graph_inspect = sub.add_parser("graph-inspect")
+    graph_inspect.add_argument("capability")
+
+    graph_plan = sub.add_parser("graph-plan")
+    graph_plan.add_argument("goal")
+    graph_plan.add_argument("--authority", action="append", default=[])
+    graph_plan.add_argument("--head-sha")
+
+    graph_export = sub.add_parser("graph-export")
+    graph_export.add_argument("dest")
+
     args = parser.parse_args()
     store = Store(args.db)
     store.init()
@@ -55,6 +79,9 @@ def main() -> None:
             "immune_state",
             "checkpoints",
             "sessions",
+            "capabilities",
+            "capability_plans",
+            "capability_evidence",
         ]
         output = {
             table: store.db.execute(
@@ -119,6 +146,50 @@ def main() -> None:
         finally:
             src_db.close()
         print(f"restored from {src}")
+
+    elif args.cmd == "graph-validate":
+        errors = validate_manifest(load_manifest(args.manifest))
+        print(json.dumps({"valid": not errors, "errors": errors}, indent=2))
+        if errors:
+            raise SystemExit(1)
+
+    elif args.cmd == "graph-import":
+        graph = CapabilityGraph(store.db)
+        source = Path(args.manifest)
+        if source.is_dir():
+            graph.import_bundle(source)
+        else:
+            graph.import_manifest(load_manifest(source))
+        print(json.dumps({"imported": args.manifest, "capabilities": len(graph.list_capabilities())}, indent=2))
+
+    elif args.cmd == "graph-list":
+        print(json.dumps(CapabilityGraph(store.db).list_capabilities(), indent=2))
+
+    elif args.cmd == "graph-inspect":
+        capability_id, separator, version = args.capability.partition("@")
+        print(json.dumps(CapabilityGraph(store.db).inspect(
+            capability_id, version if separator else None
+        ), indent=2))
+
+    elif args.cmd == "graph-plan":
+        plans = CapabilityGraph(store.db).plan(
+            args.goal, set(args.authority), args.head_sha
+        )
+        print(json.dumps([
+            {
+                "plan_id": plan.plan_id,
+                "goal": plan.goal,
+                "steps": [asdict(step) for step in plan.steps],
+            }
+            for plan in plans
+        ], indent=2))
+        if not plans:
+            raise SystemExit("no valid plan for the declared goal and authority")
+
+    elif args.cmd == "graph-export":
+        destination = Path(args.dest)
+        CapabilityGraph(store.db).export_bundle(destination)
+        print(f"exported to {destination}")
 
 
 if __name__ == "__main__":

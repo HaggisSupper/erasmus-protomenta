@@ -117,6 +117,109 @@ MIGRATIONS: list[tuple[int, str]] = [
         WHERE created_at IS NULL OR created_at = ''
         """,
     ),
+    (
+        4,
+        # Minimal OKF-backed capability graph. Manifests remain the portable
+        # source of truth; these tables are the deterministic projection used
+        # for validation, planning, execution evidence, and rebuilds.
+        """
+        CREATE TABLE capability_manifest_sets(
+            profile       TEXT PRIMARY KEY,
+            manifest_json TEXT NOT NULL,
+            imported_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE capability_okf_documents(
+            path    TEXT PRIMARY KEY,
+            content TEXT NOT NULL
+        );
+        CREATE TABLE capabilities(
+            id                  TEXT NOT NULL,
+            version             TEXT NOT NULL,
+            purpose             TEXT NOT NULL,
+            classification      TEXT NOT NULL,
+            goals_json          TEXT NOT NULL,
+            authority_json      TEXT NOT NULL,
+            side_effects_json   TEXT NOT NULL,
+            provenance_json     TEXT NOT NULL,
+            failure_behavior    TEXT NOT NULL,
+            rollback_behavior   TEXT,
+            cost_json           TEXT NOT NULL,
+            evidence_json       TEXT NOT NULL,
+            implementations_json TEXT NOT NULL,
+            tenth_man_json      TEXT NOT NULL,
+            PRIMARY KEY(id, version)
+        );
+        CREATE TABLE capability_ports(
+            capability_id      TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            direction          TEXT NOT NULL CHECK(direction IN ('input', 'output')),
+            name               TEXT NOT NULL,
+            schema_json        TEXT NOT NULL,
+            PRIMARY KEY(capability_id, capability_version, direction, name),
+            FOREIGN KEY(capability_id, capability_version)
+                REFERENCES capabilities(id, version) ON DELETE CASCADE
+        );
+        CREATE TABLE capability_edges(
+            source_id      TEXT NOT NULL,
+            source_version TEXT NOT NULL,
+            edge_type      TEXT NOT NULL,
+            target_id      TEXT NOT NULL,
+            target_version TEXT NOT NULL,
+            PRIMARY KEY(source_id, source_version, edge_type, target_id, target_version),
+            FOREIGN KEY(source_id, source_version)
+                REFERENCES capabilities(id, version) ON DELETE CASCADE,
+            FOREIGN KEY(target_id, target_version)
+                REFERENCES capabilities(id, version) ON DELETE CASCADE
+        );
+        CREATE TABLE capability_implementations(
+            id                 TEXT NOT NULL,
+            version            TEXT NOT NULL,
+            capability_id      TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            PRIMARY KEY(id, version),
+            FOREIGN KEY(capability_id, capability_version)
+                REFERENCES capabilities(id, version) ON DELETE CASCADE
+        );
+        CREATE TABLE capability_authorities(
+            capability_id      TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            authority          TEXT NOT NULL,
+            PRIMARY KEY(capability_id, capability_version, authority),
+            FOREIGN KEY(capability_id, capability_version)
+                REFERENCES capabilities(id, version) ON DELETE CASCADE
+        );
+        CREATE TABLE capability_plans(
+            id               INTEGER PRIMARY KEY,
+            goal             TEXT NOT NULL,
+            authority_json   TEXT NOT NULL,
+            head_sha         TEXT,
+            status           TEXT NOT NULL,
+            created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE capability_execution_steps(
+            plan_id            INTEGER NOT NULL,
+            position           INTEGER NOT NULL,
+            capability_id      TEXT NOT NULL,
+            capability_version TEXT NOT NULL,
+            implementation_id  TEXT NOT NULL,
+            implementation_version TEXT NOT NULL,
+            PRIMARY KEY(plan_id, position),
+            FOREIGN KEY(plan_id) REFERENCES capability_plans(id) ON DELETE CASCADE
+        );
+        CREATE TABLE capability_evidence(
+            id                     INTEGER PRIMARY KEY,
+            capability_id          TEXT NOT NULL,
+            capability_version     TEXT NOT NULL,
+            implementation_id      TEXT NOT NULL,
+            implementation_version TEXT NOT NULL,
+            inputs_json            TEXT NOT NULL,
+            outputs_json           TEXT NOT NULL,
+            head_sha               TEXT,
+            result                 TEXT NOT NULL,
+            created_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    ),
 ]
 
 

@@ -1,26 +1,107 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Capability Contract",
+  "$id": "https://erasmus.local/contracts/capability-set-v1.json",
+  "title": "Erasmus normalized capability projection from OKF 0.1",
   "type": "object",
-  "required": [
-    "id",
-    "version",
-    "purpose",
-    "input_schema",
-    "output_schema",
-    "authority",
-    "execution"
-  ],
+  "required": ["profile", "capabilities", "implementations", "edges"],
   "properties": {
-    "id": {"type": "string"},
-    "version": {"type": "string"},
-    "purpose": {"type": "string"},
-    "input_schema": {"type": "string"},
-    "output_schema": {"type": "string"},
-    "authority": {"type": "object"},
-    "execution": {"type": "object"},
-    "failure": {"type": "object"},
-    "evidence": {"type": "object"}
+    "profile": {"const": "erasmus.okf.capability-set/v1"},
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/capability"}
+    },
+    "implementations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/implementation"}
+    },
+    "edges": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/edge"}
+    }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "stringList": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/nonempty"},
+      "uniqueItems": true
+    },
+    "port": {
+      "type": "object",
+      "required": ["name", "schema"],
+      "properties": {
+        "name": {"$ref": "#/$defs/nonempty"},
+        "schema": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "capability": {
+      "type": "object",
+      "required": [
+        "id", "version", "purpose", "classification", "goals", "inputs",
+        "outputs", "authority_required", "side_effects",
+        "provenance_requirements", "failure_behavior", "rollback_behavior",
+        "cost", "required_evidence", "allowed_implementations",
+        "tenth_man_triggers"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/nonempty"},
+        "version": {"$ref": "#/$defs/nonempty"},
+        "purpose": {"$ref": "#/$defs/nonempty"},
+        "classification": {
+          "enum": ["deterministic", "statistical", "semantic"]
+        },
+        "goals": {"$ref": "#/$defs/stringList"},
+        "inputs": {"type": "array", "items": {"$ref": "#/$defs/port"}},
+        "outputs": {"type": "array", "items": {"$ref": "#/$defs/port"}},
+        "authority_required": {"$ref": "#/$defs/stringList"},
+        "side_effects": {"$ref": "#/$defs/stringList"},
+        "provenance_requirements": {"$ref": "#/$defs/stringList"},
+        "failure_behavior": {"$ref": "#/$defs/nonempty"},
+        "rollback_behavior": {"type": ["string", "null"]},
+        "cost": {
+          "type": "object",
+          "required": ["units", "budget"],
+          "properties": {
+            "units": {"$ref": "#/$defs/nonempty"},
+            "budget": {"type": "number", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "required_evidence": {"$ref": "#/$defs/stringList"},
+        "allowed_implementations": {"$ref": "#/$defs/stringList"},
+        "tenth_man_triggers": {"$ref": "#/$defs/stringList"}
+      },
+      "additionalProperties": false
+    },
+    "implementation": {
+      "type": "object",
+      "required": ["id", "version", "capability_id", "capability_version"],
+      "properties": {
+        "id": {"$ref": "#/$defs/nonempty"},
+        "version": {"$ref": "#/$defs/nonempty"},
+        "capability_id": {"$ref": "#/$defs/nonempty"},
+        "capability_version": {"$ref": "#/$defs/nonempty"}
+      },
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "type", "to"],
+      "properties": {
+        "from": {"$ref": "#/$defs/nonempty"},
+        "type": {
+          "enum": [
+            "requires", "produces", "validates", "implements",
+            "authorized_by", "conflicts_with", "may_follow",
+            "can_rollback", "escalates_to"
+          ]
+        },
+        "to": {"$ref": "#/$defs/nonempty"}
+      },
+      "additionalProperties": false
+    }
+  }
 }

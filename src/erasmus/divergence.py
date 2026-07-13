@@ -146,6 +146,11 @@ class DivergenceEngine:
         if any(not isinstance(source_ref, str) or not source_ref.strip() for source_ref in source_refs):
             raise DivergenceError("source references must be non-empty strings")
         features = extract_features(events)
+        calibration = None
+        if calibration_id is not None:
+            calibration = self._calibration(calibration_id)
+            if calibration["kind"] == "classical" and not self._classical_active():
+                raise DivergenceError("classical detector capability is not active")
         with self.store.db:
             window = self.store.db.execute(
                 """
@@ -157,10 +162,7 @@ class DivergenceEngine:
             )
         window_id = int(window.lastrowid)
         detections = self._deterministic(features, consequence)
-        if calibration_id is not None:
-            calibration = self._calibration(calibration_id)
-            if calibration["kind"] == "classical" and not self._classical_active():
-                raise DivergenceError("classical detector capability is not active")
+        if calibration is not None:
             detections.append(self._calibrated(features, consequence, calibration))
         ids = []
         with self.store.db:
@@ -223,9 +225,9 @@ class DivergenceEngine:
         reasons = []
         if features["authority_requests"] > 0:
             reasons.append("undeclared authority request requires review")
-        if features["assertion_to_evidence_ratio"] >= 3 and features["evidence_count_change"] == 0:
+        if features["assertion_to_evidence_ratio"] >= 3 and features["evidence_count_change"] <= 0:
             reasons.append("assertions increased without evidence")
-        if features["agreement_velocity"] >= 0.75 and features["evidence_count_change"] == 0:
+        if features["agreement_velocity"] >= 0.75 and features["evidence_count_change"] <= 0:
             reasons.append("rapid agreement lacks new evidence")
         score = min(1.0, len(reasons) * 0.35 + consequence * 0.3)
         outcome = "escalate" if reasons and consequence >= 0.8 else "wake" if reasons else "pass"

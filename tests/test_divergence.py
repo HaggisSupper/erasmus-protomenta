@@ -78,8 +78,14 @@ def test_statistical_and_classical_detectors_are_inspectable_and_gated(tmp_path)
     classical = engine.calibrate(
         "knn_distance", "classical", baseline, 4.0, "reviewer", "optional method"
     )
+    windows_before = engine.store.db.execute(
+        "SELECT COUNT(*) FROM divergence_windows"
+    ).fetchone()[0]
     with pytest.raises(DivergenceError, match="capability is not active"):
         engine.evaluate(_mutual(), consequence=0.6, calibration_id=classical)
+    assert engine.store.db.execute(
+        "SELECT COUNT(*) FROM divergence_windows"
+    ).fetchone()[0] == windows_before
     CapabilityGraph(engine.store.db).import_manifest(
         load_manifest("capabilities/okf/pr-governance")
     )
@@ -111,6 +117,13 @@ def test_low_prior_novelty_alone_passes_and_regulator_can_downweight(tmp_path):
     assert engine.store.db.execute(
         "SELECT weight FROM divergence_calibrations WHERE id = ?", (lowered,)
     ).fetchone()[0] == 0.5
+
+
+def test_evidence_removal_triggers_deterministic_mutual_reinforcement(tmp_path):
+    events = _mutual()
+    events[0]["evidence_delta"] = -1
+    result = DivergenceEngine(_store(tmp_path)).evaluate(events, consequence=0.4)
+    assert result["recommendations"][0]["outcome"] == "wake"
 
 
 def test_offline_evaluation_reports_metrics_and_missed_consequence(tmp_path):

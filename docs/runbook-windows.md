@@ -33,7 +33,7 @@ erasmus --db state\erasmus.db status
 #   "immune_state": 0,
 #   "checkpoints": 0,
 #   "sessions": 0,
-#   "schema_versions": [1, 2, 3, 4, 5]
+#   "schema_versions": [1, 2, 3, 4, 5, 6]
 # }
 ```
 

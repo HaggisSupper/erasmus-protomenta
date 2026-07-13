@@ -262,6 +262,36 @@ MIGRATIONS: list[tuple[int, str]] = [
         )
         """,
     ),
+    (
+        6,
+        # SQLite cannot add a CHECK constraint in place, so rebuild the edge
+        # projection while preserving every valid row from migration 4.
+        """
+        CREATE TABLE capability_edges_v6(
+            source_id      TEXT NOT NULL,
+            source_version TEXT NOT NULL,
+            edge_type      TEXT NOT NULL CHECK(edge_type IN (
+                'requires', 'produces', 'validates', 'implements',
+                'authorized_by', 'conflicts_with', 'may_follow',
+                'can_rollback', 'escalates_to'
+            )),
+            target_id      TEXT NOT NULL,
+            target_version TEXT NOT NULL,
+            PRIMARY KEY(source_id, source_version, edge_type, target_id, target_version),
+            FOREIGN KEY(source_id, source_version)
+                REFERENCES capabilities(id, version) ON DELETE CASCADE,
+            FOREIGN KEY(target_id, target_version)
+                REFERENCES capabilities(id, version) ON DELETE CASCADE
+        );
+        INSERT INTO capability_edges_v6(
+            source_id, source_version, edge_type, target_id, target_version
+        )
+        SELECT source_id, source_version, edge_type, target_id, target_version
+        FROM capability_edges;
+        DROP TABLE capability_edges;
+        ALTER TABLE capability_edges_v6 RENAME TO capability_edges
+        """,
+    ),
 ]
 
 

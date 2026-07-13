@@ -73,6 +73,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self.wfile.write(b'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n')
         self.wfile.flush()
+        if behavior == "sse_metadata":
+            self.wfile.write(b"event: completion\nid: 7\nretry: 1000\n")
         self.wfile.write(b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n')
         if behavior != "no_done":
             self.wfile.write(b"data: [DONE]\n\n")
@@ -170,6 +172,12 @@ def test_stream_cancellation_is_typed(endpoint):
         next(stream)
 
 
+def test_stream_accepts_standard_sse_metadata(endpoint):
+    server, url = endpoint
+    server.behavior = "sse_metadata"
+    assert "".join(OpenAICompatibleRuntime(_config(url)).stream([])) == "hello"
+
+
 def test_configuration_validation_fails_closed():
     with pytest.raises(RuntimeConfigurationError, match="absolute HTTP"):
         LocalRuntimeConfig.from_mapping({"base_url": "not-a-url", "model": "x"})
@@ -255,6 +263,12 @@ def test_existing_sqlite_fts_retrieval_preserves_row_reference(tmp_path):
     )
     assert evidence[0]["content"] == "bounded local evidence"
     assert evidence[0]["source_ref"].endswith(":memory:1")
+
+    with pytest.raises(ContextError, match="rowid source reference"):
+        retrieve_fts(
+            lambda _request: {"rows": [{"content": "missing provenance"}]},
+            database=str(database), table="memory", query="bounded",
+        )
 
 
 def test_session_journals_identity_context_response_and_source_refs(tmp_path, endpoint):

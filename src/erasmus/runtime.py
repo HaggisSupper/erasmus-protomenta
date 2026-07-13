@@ -209,7 +209,7 @@ class OpenAICompatibleRuntime:
                 if not line or line.startswith(":"):
                     continue
                 if not line.startswith("data:"):
-                    raise RuntimeProtocolError("stream line is not SSE data")
+                    continue
                 data = line[5:].strip()
                 if data == "[DONE]":
                     saw_done = True

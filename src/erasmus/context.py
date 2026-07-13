@@ -186,13 +186,16 @@ def retrieve_fts(
     )
     evidence = []
     for row in result.get("rows", []):
+        rowid = row.get("rowid")
+        if rowid is None:
+            raise ContextError("retrieved FTS evidence requires a rowid source reference")
         content = row.get("content", row.get("text", row.get("payload")))
         if content is None:
             content = json.dumps(dict(row), sort_keys=True)
         evidence.append(
             {
                 "content": str(content),
-                "source_ref": f"sqlite:{database}:{table}:{row['rowid']}",
+                "source_ref": f"sqlite:{database}:{table}:{rowid}",
             }
         )
     return evidence

@@ -149,7 +149,11 @@ def test_authority_expansion_pauses_and_denial_fails(tmp_path):
     assert paused["approval_required"] is True
     assert engine.inspect(mission_id)["state"] == "awaiting_approval"
     engine.decide_approval(mission_id, paused["approval_id"], False, "Protomentat")
-    assert engine.inspect(mission_id)["state"] == "failed"
+    inspected = engine.inspect(mission_id)
+    assert inspected["state"] == "failed"
+    assert inspected["transitions"][-1]["evidence"] == [
+        f"approval:{inspected['approvals'][-1]['id']}"
+    ]
 
 
 def test_irreversible_step_requires_explicit_approval(tmp_path):
@@ -224,6 +228,28 @@ def test_interrupted_unrecorded_side_effect_fails_safe(tmp_path):
     assert engine.inspect(mission_id)["state"] == "blocked"
 
 
+def test_recovered_failed_invocation_fails_the_mission(tmp_path):
+    store, runtime, engine = environment(tmp_path, handler=lambda _: {})
+    mission_id = engine.create(contract())
+    authorize(engine, mission_id)
+    engine._transition(mission_id, "running", "simulated_start")
+    store.db.execute(
+        "UPDATE mission_steps SET status = 'running' WHERE mission_id = ?", (mission_id,)
+    )
+    failed = runtime.invoke(
+        CapabilityRequest(
+            "validate_json_schema", "1.0.0",
+            {"schema": {"type": "integer"}, "instance": 1},
+            frozenset({"schema:validate"}),
+            {"caller": "mission-test", "request_id": "failed", "mission_id": mission_id, "step_id": "validate"},
+            frozenset(), ("validation_result",),
+        )
+    )
+    assert not failed.ok
+    assert engine.recover(mission_id)["failed"] == 1
+    assert engine.inspect(mission_id)["state"] == "failed"
+
+
 def test_rollback_executes_only_declared_actions_and_reports_others(tmp_path):
     calls = []
 
@@ -257,6 +283,60 @@ def test_rollback_executes_only_declared_actions_and_reports_others(tmp_path):
     assert [*calls] == ["forward", "rollback"]
     assert report["rolled_back"] and not report["failed"]
     assert engine.inspect(mission_id)["state"] == "rolled_back"
+
+
+def test_failed_side_effect_is_rolled_back_when_declared(tmp_path):
+    calls = []
+
+    def build(inputs):
+        calls.append(inputs["head_sha"])
+        if inputs["head_sha"] == "forward":
+            raise RuntimeError("failed after effect")
+        return {"build_result": {"head_sha": inputs["head_sha"]}}
+
+    _, _, engine = environment(tmp_path, "compile_build", "python_builder", build)
+    rollback = {
+        "capability_id": "compile_build", "version": "1.0.0",
+        "inputs": {"head_sha": "rollback"}, "authorities": ["process:execute"],
+        "provenance": {"head_sha": "rollback", "command": "rollback", "tool_version": "1"},
+        "side_effects": ["writes_build_artifacts"], "evidence_refs": ["build_log"],
+    }
+    step = invocation(
+        capability_id="compile_build", inputs={"head_sha": "forward"},
+        authorities=["process:execute"],
+        provenance={"head_sha": "forward", "command": "build", "tool_version": "1"},
+        side_effects=["writes_build_artifacts"], evidence_refs=["build_log"], rollback=rollback,
+    )
+    mission_id = engine.create(contract(
+        steps=[step], authority_envelope=["process:execute"],
+        allowed_capabilities=["compile_build@1.0.0"], evidence_requirements=["build_log"],
+    ))
+    authorize(engine, mission_id)
+    assert engine.run_one(mission_id)["ok"] is False
+    assert engine.rollback(mission_id)["rolled_back"]
+    assert calls == ["forward", "rollback"]
+    assert engine.inspect(mission_id)["state"] == "rolled_back"
+
+
+def test_non_reversible_effect_prevents_rolled_back_state(tmp_path):
+    def build(inputs):
+        return {"build_result": {"head_sha": inputs["head_sha"]}}
+
+    _, _, engine = environment(tmp_path, "compile_build", "python_builder", build)
+    step = invocation(
+        capability_id="compile_build", inputs={"head_sha": "forward"},
+        authorities=["process:execute"],
+        provenance={"head_sha": "forward", "command": "build", "tool_version": "1"},
+        side_effects=["writes_build_artifacts"], evidence_refs=["build_log"],
+    )
+    mission_id = engine.create(contract(
+        steps=[step], authority_envelope=["process:execute"],
+        allowed_capabilities=["compile_build@1.0.0"], evidence_requirements=["build_log"],
+    ))
+    authorize(engine, mission_id)
+    assert engine.run_one(mission_id)["completed"] is True
+    assert engine.rollback(mission_id)["non_reversible"] == ["validate"]
+    assert engine.inspect(mission_id)["state"] == "completed"
 
 
 def test_cli_create_inspect_authorize_and_cancel(tmp_path, monkeypatch, capsys):

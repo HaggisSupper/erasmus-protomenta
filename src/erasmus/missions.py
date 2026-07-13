@@ -24,9 +24,11 @@ STATES = frozenset(
 TRANSITIONS = {
     "draft": frozenset({"proposed", "cancelled"}),
     "proposed": frozenset({"authorized", "cancelled"}),
-    "authorized": frozenset({"running", "blocked", "awaiting_approval", "cancelled"}),
+    "authorized": frozenset(
+        {"running", "blocked", "awaiting_approval", "failed", "cancelled"}
+    ),
     "running": frozenset({"blocked", "awaiting_approval", "completed", "failed", "cancelled"}),
-    "blocked": frozenset({"running", "cancelled", "rolled_back"}),
+    "blocked": frozenset({"running", "failed", "cancelled", "rolled_back"}),
     "awaiting_approval": frozenset({"running", "failed", "cancelled"}),
     "completed": frozenset({"rolled_back"}),
     "failed": frozenset({"rolled_back"}),
@@ -208,7 +210,7 @@ class MissionEngine:
             raise MissionError("approval request already decided")
         decision = "approved" if approve else "denied"
         with self.store.db:
-            self._approval_event(
+            decision_id = self._approval_event(
                 mission_id, request["request_key"], request["kind"], decision,
                 json.loads(request["detail_json"]), actor,
             )
@@ -216,7 +218,7 @@ class MissionEngine:
                 mission_id,
                 "running" if approve else "failed",
                 f"approval_{decision}",
-                [f"approval:{approval_id}"],
+                [f"approval:{decision_id}"],
             )
 
     def run_one(self, mission_id: int) -> dict[str, Any]:
@@ -330,8 +332,8 @@ class MissionEngine:
     def recover(self, mission_id: int) -> dict[str, int]:
         mission = self._mission(mission_id)
         if mission["status"] not in {"running", "blocked", "authorized"}:
-            return {"completed": 0, "reset": 0, "uncertain": 0}
-        recovered = {"completed": 0, "reset": 0, "uncertain": 0}
+            return {"completed": 0, "failed": 0, "reset": 0, "uncertain": 0}
+        recovered = {"completed": 0, "failed": 0, "reset": 0, "uncertain": 0}
         running = self.store.db.execute(
             "SELECT * FROM mission_steps WHERE mission_id = ? AND status = 'running'",
             (mission_id,),
@@ -366,6 +368,7 @@ class MissionEngine:
                         ),
                     )
                     recovered["completed"] += invocation["status"] == "success"
+                    recovered["failed"] += invocation["status"] == "failure"
                 elif request_data["side_effects"]:
                     self.store.db.execute(
                         "UPDATE mission_steps SET status = 'uncertain' WHERE mission_id = ? AND position = ?",
@@ -378,7 +381,12 @@ class MissionEngine:
                         (mission_id, step["position"]),
                     )
                     recovered["reset"] += 1
-            if recovered["uncertain"] and self._mission(mission_id)["status"] == "running":
+            current = self._mission(mission_id)["status"]
+            if recovered["failed"] and current in {"authorized", "running", "blocked"}:
+                self._transition_in_transaction(
+                    mission_id, "failed", "failed_invocation_recovered"
+                )
+            elif recovered["uncertain"] and current == "running":
                 self._transition_in_transaction(
                     mission_id, "blocked", "uncertain_side_effect_after_interruption"
                 )
@@ -395,7 +403,7 @@ class MissionEngine:
         steps = self.store.db.execute(
             """
             SELECT * FROM mission_steps
-            WHERE mission_id = ? AND status IN ('completed', 'rollback_running')
+            WHERE mission_id = ? AND status IN ('completed', 'failed', 'rollback_running')
             ORDER BY position DESC
             """,
             (mission_id,),
@@ -465,7 +473,7 @@ class MissionEngine:
                         "UPDATE mission_steps SET status = 'rolled_back' WHERE mission_id = ? AND position = ?",
                         (mission_id, step["position"]),
                     )
-        if not report["failed"]:
+        if not report["failed"] and not report["non_reversible"]:
             self._transition(mission_id, "rolled_back", "declared_rollback_executed")
         return report
 

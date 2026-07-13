@@ -12,8 +12,14 @@ from erasmus.capability_graph import (
     load_manifest,
     validate_manifest,
 )
+from erasmus.capability_runtime import (
+    CapabilityRuntime,
+    hash_content,
+    query_sqlite_fts,
+    validate_json_schema,
+)
 from erasmus.checkpoint import load_latest_checkpoint
-from erasmus.missions import create_mission
+from erasmus.missions import MissionEngine, create_mission
 from erasmus.review import tenth_man_prompt
 from erasmus.sleep import consolidate
 from erasmus.store import Store
@@ -37,10 +43,26 @@ def main() -> None:
     sub.add_parser("integrity")
 
     mission = sub.add_parser("mission-create")
-    mission.add_argument("--title", required=True)
-    mission.add_argument("--objective", required=True)
+    mission.add_argument("--contract")
+    mission.add_argument("--title")
+    mission.add_argument("--objective")
     mission.add_argument("--success", default="Defined outcome achieved")
     mission.add_argument("--risk", type=float, default=0.0)
+
+    mission_inspect = sub.add_parser("mission-inspect")
+    mission_inspect.add_argument("mission_id", type=int)
+    mission_authorize = sub.add_parser("mission-authorize")
+    mission_authorize.add_argument("mission_id", type=int)
+    mission_authorize.add_argument("--actor", required=True)
+    mission_authorize.add_argument("--evidence", action="append", default=[])
+    mission_authorize.add_argument("--approval-id", type=int)
+    mission_authorize.add_argument("--deny", action="store_true")
+    for command in (
+        "mission-run-one", "mission-pause", "mission-resume",
+        "mission-cancel", "mission-rollback",
+    ):
+        command_parser = sub.add_parser(command)
+        command_parser.add_argument("mission_id", type=int)
 
     review = sub.add_parser("review")
     review.add_argument("--proposition", required=True)
@@ -156,15 +178,49 @@ def main() -> None:
         print(json.dumps(results, indent=2))
 
     elif args.cmd == "mission-create":
-        print(
-            create_mission(
-                store,
-                args.title,
-                args.objective,
-                args.success,
-                args.risk,
+        if args.contract:
+            raw_contract = json.loads(Path(args.contract).read_text(encoding="utf-8"))
+            print(MissionEngine(store).create(raw_contract))
+        else:
+            if not args.title or not args.objective:
+                raise SystemExit("mission-create requires --contract or both --title and --objective")
+            print(create_mission(store, args.title, args.objective, args.success, args.risk))
+
+    elif args.cmd == "mission-inspect":
+        print(json.dumps(MissionEngine(store).inspect(args.mission_id), indent=2))
+
+    elif args.cmd == "mission-authorize":
+        engine = MissionEngine(store)
+        if args.approval_id is None:
+            engine.authorize(args.mission_id, args.actor, args.evidence)
+        else:
+            engine.decide_approval(
+                args.mission_id, args.approval_id, not args.deny, args.actor
             )
-        )
+        print(json.dumps(engine.inspect(args.mission_id), indent=2))
+
+    elif args.cmd == "mission-run-one":
+        engine = _executable_mission_engine(store, args.mission_id)
+        print(json.dumps(engine.run_one(args.mission_id), indent=2))
+
+    elif args.cmd == "mission-pause":
+        engine = MissionEngine(store)
+        engine.pause(args.mission_id)
+        print(json.dumps(engine.inspect(args.mission_id), indent=2))
+
+    elif args.cmd == "mission-resume":
+        engine = _executable_mission_engine(store, args.mission_id)
+        engine.resume(args.mission_id)
+        print(json.dumps(engine.inspect(args.mission_id), indent=2))
+
+    elif args.cmd == "mission-cancel":
+        engine = MissionEngine(store)
+        engine.cancel(args.mission_id)
+        print(json.dumps(engine.inspect(args.mission_id), indent=2))
+
+    elif args.cmd == "mission-rollback":
+        engine = _executable_mission_engine(store, args.mission_id)
+        print(json.dumps(engine.rollback(args.mission_id), indent=2))
 
     elif args.cmd == "review":
         print(tenth_man_prompt(args.proposition))
@@ -319,6 +375,29 @@ def main() -> None:
         print(json.dumps({"valid": not errors, "errors": errors}, indent=2))
         if errors:
             raise SystemExit(1)
+
+
+def _executable_mission_engine(store: Store, mission_id: int) -> MissionEngine:
+    """Bind reviewed in-process references; lifecycle state remains authoritative."""
+    inspection = MissionEngine(store).inspect(mission_id)
+    runtime = CapabilityRuntime(store)
+    handlers = {
+        "validate_json_schema": ("jsonschema_validator", validate_json_schema),
+        "hash_content": ("sha256_hasher", hash_content([Path.cwd()])),
+        "query_sqlite_fts": ("sqlite_fts_reader", query_sqlite_fts([Path.cwd()])),
+    }
+    steps = inspection["contract"]["steps"]
+    invocations = [*steps, *(step["rollback"] for step in steps if step.get("rollback"))]
+    configured: set[tuple[str, str]] = set()
+    for invocation in invocations:
+        capability_id = invocation["capability_id"]
+        version = invocation["version"]
+        if (capability_id, version) in configured or capability_id not in handlers:
+            continue
+        implementation, handler = handlers[capability_id]
+        runtime.configure(capability_id, version, implementation, "1.0.0", handler)
+        configured.add((capability_id, version))
+    return MissionEngine(store, runtime)
 
 
 if __name__ == "__main__":

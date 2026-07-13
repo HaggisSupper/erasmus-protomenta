@@ -1,0 +1,37 @@
+{
+  "version": "1.0.0",
+  "title": "Validate a bounded value",
+  "objective": "Validate one integer against a declared JSON Schema",
+  "success_conditions": ["the declared step completes"],
+  "constraints": ["execute one committed step at a time"],
+  "authority_envelope": ["schema:validate"],
+  "allowed_capabilities": ["validate_json_schema@1.0.0"],
+  "evidence_requirements": ["validation_result"],
+  "risk_class": "low",
+  "stopping_condition": {
+    "type": "all_steps_completed",
+    "max_steps": 1
+  },
+  "rollback_plan": {
+    "description": "No state changes require rollback"
+  },
+  "steps": [
+    {
+      "id": "validate_integer",
+      "capability_id": "validate_json_schema",
+      "version": "1.0.0",
+      "inputs": {
+        "schema": {"type": "integer"},
+        "instance": 1
+      },
+      "authorities": ["schema:validate"],
+      "provenance": {
+        "caller": "manual-verification",
+        "request_id": "valid-mission-1"
+      },
+      "side_effects": [],
+      "evidence_refs": ["validation_result"],
+      "irreversible": false
+    }
+  ]
+}

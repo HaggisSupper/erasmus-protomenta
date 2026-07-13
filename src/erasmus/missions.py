@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -13,7 +14,7 @@ from erasmus.capability_runtime import CapabilityRequest, CapabilityRuntime
 from erasmus.store import Store
 
 
-SCHEMA_PATH = Path(__file__).resolve().parents[2] / "contracts" / "mission.schema.json"
+CHECKOUT_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "contracts" / "mission.schema.json"
 STATES = frozenset(
     {
         "draft", "proposed", "authorized", "running", "blocked",
@@ -46,7 +47,12 @@ class MissionContract:
     def from_dict(cls, raw: Mapping[str, Any]) -> MissionContract:
         if not isinstance(raw, Mapping):
             raise MissionError("invalid mission contract: expected an object")
-        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        resource = files("erasmus").joinpath("contracts/mission.schema.json")
+        try:
+            schema_text = resource.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            schema_text = CHECKOUT_SCHEMA_PATH.read_text(encoding="utf-8")
+        schema = json.loads(schema_text)
         errors = sorted(
             Draft202012Validator(schema).iter_errors(raw), key=lambda error: list(error.path)
         )
@@ -133,7 +139,7 @@ class MissionEngine:
                         int(step["irreversible"]),
                     ),
                 )
-        self._transition(mission_id, "proposed", "contract_validated")
+            self._transition_in_transaction(mission_id, "proposed", "contract_validated")
         return mission_id
 
     def inspect(self, mission_id: int) -> dict[str, Any]:
@@ -179,7 +185,9 @@ class MissionEngine:
                 mission_id, "initial", "initial_authorization", "approved",
                 {"evidence": evidence}, actor,
             )
-        self._transition(mission_id, "authorized", "explicit_authorization", evidence)
+            self._transition_in_transaction(
+                mission_id, "authorized", "explicit_authorization", evidence
+            )
 
     def decide_approval(self, mission_id: int, approval_id: int, approve: bool, actor: str) -> None:
         if not actor.strip():
@@ -204,12 +212,12 @@ class MissionEngine:
                 mission_id, request["request_key"], request["kind"], decision,
                 json.loads(request["detail_json"]), actor,
             )
-        self._transition(
-            mission_id,
-            "running" if approve else "failed",
-            f"approval_{decision}",
-            [f"approval:{approval_id}"],
-        )
+            self._transition_in_transaction(
+                mission_id,
+                "running" if approve else "failed",
+                f"approval_{decision}",
+                [f"approval:{approval_id}"],
+            )
 
     def run_one(self, mission_id: int) -> dict[str, Any]:
         if self.runtime is None:
@@ -328,22 +336,22 @@ class MissionEngine:
             "SELECT * FROM mission_steps WHERE mission_id = ? AND status = 'running'",
             (mission_id,),
         ).fetchall()
-        for step in running:
-            invocation = self.store.db.execute(
-                """
-                SELECT invocation_id, result_json, status, evidence_json
-                FROM capability_invocations
-                WHERE json_extract(provenance_json, '$.mission_id') = ?
-                  AND json_extract(provenance_json, '$.step_id') = ?
-                ORDER BY rowid DESC LIMIT 1
-                """,
-                (mission_id, step["step_id"]),
-            ).fetchone()
-            request_data = json.loads(step["request_json"])
-            if invocation is not None:
-                result_payload = json.loads(invocation["result_json"])
-                result_payload["evidence_refs"] = json.loads(invocation["evidence_json"])
-                with self.store.db:
+        with self.store.db:
+            for step in running:
+                invocation = self.store.db.execute(
+                    """
+                    SELECT invocation_id, result_json, status, evidence_json
+                    FROM capability_invocations
+                    WHERE json_extract(provenance_json, '$.mission_id') = ?
+                      AND json_extract(provenance_json, '$.step_id') = ?
+                    ORDER BY rowid DESC LIMIT 1
+                    """,
+                    (mission_id, step["step_id"]),
+                ).fetchone()
+                request_data = json.loads(step["request_json"])
+                if invocation is not None:
+                    result_payload = json.loads(invocation["result_json"])
+                    result_payload["evidence_refs"] = json.loads(invocation["evidence_json"])
                     self.store.db.execute(
                         """
                         UPDATE mission_steps SET status = ?, invocation_id = ?, result_json = ?
@@ -357,23 +365,23 @@ class MissionEngine:
                             step["position"],
                         ),
                     )
-                recovered["completed"] += invocation["status"] == "success"
-            elif request_data["side_effects"]:
-                with self.store.db:
+                    recovered["completed"] += invocation["status"] == "success"
+                elif request_data["side_effects"]:
                     self.store.db.execute(
                         "UPDATE mission_steps SET status = 'uncertain' WHERE mission_id = ? AND position = ?",
                         (mission_id, step["position"]),
                     )
-                recovered["uncertain"] += 1
-            else:
-                with self.store.db:
+                    recovered["uncertain"] += 1
+                else:
                     self.store.db.execute(
                         "UPDATE mission_steps SET status = 'pending' WHERE mission_id = ? AND position = ?",
                         (mission_id, step["position"]),
                     )
-                recovered["reset"] += 1
-        if recovered["uncertain"] and self._mission(mission_id)["status"] == "running":
-            self._transition(mission_id, "blocked", "uncertain_side_effect_after_interruption")
+                    recovered["reset"] += 1
+            if recovered["uncertain"] and self._mission(mission_id)["status"] == "running":
+                self._transition_in_transaction(
+                    mission_id, "blocked", "uncertain_side_effect_after_interruption"
+                )
         return recovered
 
     def rollback(self, mission_id: int) -> dict[str, Any]:
@@ -544,23 +552,28 @@ class MissionEngine:
     def _transition(
         self, mission_id: int, target: str, reason: str, evidence: list[str] | None = None
     ) -> None:
+        with self.store.db:
+            self._transition_in_transaction(mission_id, target, reason, evidence)
+
+    def _transition_in_transaction(
+        self, mission_id: int, target: str, reason: str, evidence: list[str] | None = None
+    ) -> None:
         mission = self._mission(mission_id)
         current = str(mission["status"])
         if target not in STATES or target not in TRANSITIONS[current]:
             raise MissionError(f"invalid mission transition: {current} -> {target}")
-        with self.store.db:
-            self.store.db.execute(
-                "UPDATE missions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (target, mission_id),
-            )
-            self.store.db.execute(
-                """
-                INSERT INTO mission_transitions(
-                    mission_id, from_state, to_state, reason, evidence_json
-                ) VALUES(?, ?, ?, ?, ?)
-                """,
-                (mission_id, current, target, reason, self._json(evidence or [])),
-            )
+        self.store.db.execute(
+            "UPDATE missions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (target, mission_id),
+        )
+        self.store.db.execute(
+            """
+            INSERT INTO mission_transitions(
+                mission_id, from_state, to_state, reason, evidence_json
+            ) VALUES(?, ?, ?, ?, ?)
+            """,
+            (mission_id, current, target, reason, self._json(evidence or [])),
+        )
 
     def _mission(self, mission_id: int):
         row = self.store.db.execute(
@@ -586,8 +599,8 @@ class MissionEngine:
 
     @staticmethod
     def _decoded(value: dict[str, Any], key: str) -> dict[str, Any]:
-        if value.get(key) is not None:
-            value[key.removesuffix("_json")] = json.loads(value.pop(key))
+        raw = value.pop(key, None)
+        value[key.removesuffix("_json")] = json.loads(raw) if raw is not None else None
         return value
 
     @staticmethod

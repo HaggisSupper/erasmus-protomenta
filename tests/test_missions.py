@@ -68,7 +68,10 @@ def authorize(engine, mission_id):
 def test_authorized_bounded_mission_completes_and_is_auditable(tmp_path):
     store, _, engine = environment(tmp_path)
     mission_id = engine.create(contract())
-    assert engine.inspect(mission_id)["state"] == "proposed"
+    proposed = engine.inspect(mission_id)
+    assert proposed["state"] == "proposed"
+    assert proposed["steps"][0]["result"] is None
+    assert "result_json" not in proposed["steps"][0]
     with pytest.raises(MissionError, match="cannot run"):
         engine.run_one(mission_id)
     authorize(engine, mission_id)
@@ -97,6 +100,28 @@ def test_invalid_transition_and_capability_envelope_fail_closed(tmp_path):
     with pytest.raises(MissionError, match="outside the mission envelope"):
         engine.run_one(outside_id)
     assert engine.inspect(outside_id)["state"] == "blocked"
+
+
+def test_creation_and_authorization_are_atomic(tmp_path, monkeypatch):
+    store, runtime, engine = environment(tmp_path)
+
+    def interrupted(*args, **kwargs):
+        raise RuntimeError("interrupted")
+
+    with monkeypatch.context() as context:
+        context.setattr(engine, "_transition_in_transaction", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted"):
+            engine.create(contract())
+    assert store.db.execute("SELECT COUNT(*) FROM missions").fetchone()[0] == 0
+
+    engine = MissionEngine(store, runtime)
+    mission_id = engine.create(contract())
+    with monkeypatch.context() as context:
+        context.setattr(engine, "_transition_in_transaction", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted"):
+            authorize(engine, mission_id)
+    assert engine.inspect(mission_id)["state"] == "proposed"
+    assert engine.inspect(mission_id)["approvals"] == []
 
 
 def test_step_budget_stops_before_second_execution(tmp_path):

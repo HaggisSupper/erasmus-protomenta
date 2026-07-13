@@ -18,5 +18,8 @@ erasmus = "erasmus.cli.main:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/erasmus"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"contracts/mission.schema.json" = "erasmus/contracts/mission.schema.json"
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]

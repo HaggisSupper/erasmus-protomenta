@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import sqlite3
 from dataclasses import asdict
@@ -16,11 +17,17 @@ from erasmus.missions import create_mission
 from erasmus.review import tenth_man_prompt
 from erasmus.sleep import consolidate
 from erasmus.store import Store
+from erasmus.tool_registry import (
+    ToolRegistry,
+    load_tool_manifest,
+    validate_toolchain_document,
+)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="erasmus")
     parser.add_argument("--db", default="state/erasmus.db")
+    parser.add_argument("--tool-cache", default="state/tool-cache")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("init")
@@ -63,6 +70,40 @@ def main() -> None:
     graph_export = sub.add_parser("graph-export")
     graph_export.add_argument("dest")
 
+    publisher_register = sub.add_parser("tool-publisher-register")
+    publisher_register.add_argument("publishers")
+    tool_register = sub.add_parser("tool-register")
+    tool_register.add_argument("manifest")
+    tool_verify = sub.add_parser("tool-verify")
+    tool_verify.add_argument("manifest")
+    tool_verify.add_argument("artifact")
+    tool_install = sub.add_parser("tool-install")
+    tool_install.add_argument("manifest")
+    tool_install.add_argument("artifact")
+    sub.add_parser("tool-list")
+    for command in ("tool-inspect", "tool-activate", "tool-deactivate", "tool-quarantine", "tool-revoke", "tool-uninstall"):
+        tool = sub.add_parser(command)
+        tool.add_argument("tool_id")
+        tool.add_argument("version")
+        tool.add_argument("target")
+    tool_execute = sub.add_parser("tool-execute")
+    tool_execute.add_argument("capability_id")
+    tool_execute.add_argument("capability_version")
+    tool_execute.add_argument("target")
+    tool_execute.add_argument("--authority", action="append", default=[])
+    tool_execute.add_argument("--side-effect", action="append", default=[])
+    tool_execute.add_argument("args", nargs=argparse.REMAINDER)
+    tool_health = sub.add_parser("tool-health")
+    tool_health.add_argument("tool_id")
+    tool_health.add_argument("version")
+    tool_health.add_argument("target")
+    tool_health.add_argument("--authority", action="append", default=[])
+    tool_export = sub.add_parser("tool-export")
+    tool_export.add_argument("dest")
+    toolchain_validate = sub.add_parser("toolchain-validate")
+    toolchain_validate.add_argument("document", default="TOOLCHAIN.md", nargs="?")
+    toolchain_validate.add_argument("--manifests", default="tools/manifests")
+
     args = parser.parse_args()
     store = Store(args.db)
     store.init()
@@ -82,6 +123,8 @@ def main() -> None:
             "capabilities",
             "capability_plans",
             "capability_evidence",
+            "tool_manifests",
+            "tool_audit",
         ]
         output = {
             table: store.db.execute(
@@ -190,6 +233,92 @@ def main() -> None:
         destination = Path(args.dest)
         CapabilityGraph(store.db).export_bundle(destination)
         print(f"exported to {destination}")
+
+    elif args.cmd == "tool-publisher-register":
+        registry = ToolRegistry(store.db, args.tool_cache)
+        publishers = json.loads(Path(args.publishers).read_text(encoding="utf-8"))["publishers"]
+        for publisher in publishers:
+            registry.trust_publisher(
+                publisher["key_id"], base64.b64decode(publisher["public_key"]), publisher["owner"]
+            )
+        print(json.dumps({"trusted_publishers": len(publishers)}, indent=2))
+
+    elif args.cmd == "tool-register":
+        ToolRegistry(store.db, args.tool_cache).register(load_tool_manifest(args.manifest))
+        print(f"registered {args.manifest}")
+
+    elif args.cmd == "tool-verify":
+        manifest = load_tool_manifest(args.manifest)
+        ToolRegistry(store.db, args.tool_cache).verify(manifest, args.artifact, manifest["target"])
+        print(f"verified {manifest['tool_id']}@{manifest['version']}")
+
+    elif args.cmd == "tool-install":
+        manifest = load_tool_manifest(args.manifest)
+        path = ToolRegistry(store.db, args.tool_cache).install(manifest, args.artifact)
+        print(path)
+
+    elif args.cmd == "tool-list":
+        print(json.dumps(ToolRegistry(store.db, args.tool_cache).list(), indent=2))
+
+    elif args.cmd == "tool-inspect":
+        print(json.dumps(ToolRegistry(store.db, args.tool_cache).inspect(
+            args.tool_id, args.version, args.target
+        ), indent=2))
+
+    elif args.cmd == "tool-activate":
+        ToolRegistry(store.db, args.tool_cache).activate(args.tool_id, args.version, args.target)
+        print(f"activated {args.tool_id}@{args.version}")
+
+    elif args.cmd == "tool-deactivate":
+        ToolRegistry(store.db, args.tool_cache).deactivate(args.tool_id, args.version, args.target)
+        print(f"deactivated {args.tool_id}@{args.version}")
+
+    elif args.cmd in {"tool-quarantine", "tool-revoke"}:
+        lifecycle = "quarantined" if args.cmd == "tool-quarantine" else "revoked"
+        ToolRegistry(store.db, args.tool_cache).set_lifecycle(
+            args.tool_id, args.version, args.target, lifecycle
+        )
+        print(f"{lifecycle} {args.tool_id}@{args.version}")
+
+    elif args.cmd == "tool-uninstall":
+        ToolRegistry(store.db, args.tool_cache).uninstall(args.tool_id, args.version, args.target)
+        print(f"uninstalled {args.tool_id}@{args.version}")
+
+    elif args.cmd == "tool-execute":
+        completed = ToolRegistry(store.db, args.tool_cache).execute(
+            args.capability_id, args.capability_version, args.target,
+            set(args.authority), set(args.side_effect), args.args, Path.cwd(),
+        )
+        print(json.dumps({"returncode": completed.returncode, "stdout": completed.stdout,
+                          "stderr": completed.stderr}, indent=2))
+        raise SystemExit(completed.returncode)
+
+    elif args.cmd == "tool-health":
+        registry = ToolRegistry(store.db, args.tool_cache)
+        inspected = registry.inspect(args.tool_id, args.version, args.target)
+        manifest = inspected["manifest"]
+        capability = manifest["capabilities"][0]
+        completed = registry.execute(
+            capability["id"], capability["version"], args.target, set(args.authority),
+            set(manifest["side_effects"]), manifest["health_check"], Path.cwd(),
+        )
+        print(json.dumps({"healthy": completed.returncode == 0}, indent=2))
+        raise SystemExit(completed.returncode)
+
+    elif args.cmd == "tool-export":
+        destination = Path(args.dest)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            json.dumps(ToolRegistry(store.db, args.tool_cache).export(), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"exported to {destination}")
+
+    elif args.cmd == "toolchain-validate":
+        errors = validate_toolchain_document(args.document, args.manifests)
+        print(json.dumps({"valid": not errors, "errors": errors}, indent=2))
+        if errors:
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

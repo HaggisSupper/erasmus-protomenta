@@ -189,7 +189,7 @@ class TestMigrations:
         count = store.db.execute(
             "SELECT COUNT(*) FROM schema_version"
         ).fetchone()[0]
-        assert count == 4  # exactly four migrations recorded
+        assert count == 5  # exactly five migrations recorded
 
     def test_real_premission01_upgrade(self, tmp_path):
         """Upgrade from a genuine pre-Mission-01 database with existing data.
@@ -270,7 +270,7 @@ class TestMigrations:
             "SELECT version, applied_at FROM schema_version ORDER BY version"
         ).fetchall()
         versions = [r[0] for r in rows]
-        assert versions == [1, 2, 3, 4]
+        assert versions == [1, 2, 3, 4, 5]
         for r in rows:
             assert r[1]  # applied_at provenance timestamp present
 
@@ -290,7 +290,7 @@ class TestMigrations:
         count = store2.db.execute(
             "SELECT COUNT(*) FROM schema_version"
         ).fetchone()[0]
-        assert count == 4  # still exactly four, not duplicated
+        assert count == 5  # still exactly five, not duplicated
 
         # Idempotent re-run: applying migrations again must return empty list.
         applied = apply_migrations(store2.db)
@@ -601,7 +601,7 @@ class TestRecovery:
         count = store2.db.execute(
             "SELECT COUNT(*) FROM schema_version"
         ).fetchone()[0]
-        assert count == 4  # exactly four migrations recorded, not duplicated
+        assert count == 5  # exactly five migrations recorded, not duplicated
 
 
 # ---------------------------------------------------------------------------

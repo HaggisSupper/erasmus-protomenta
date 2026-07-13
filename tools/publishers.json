@@ -1,0 +1,10 @@
+{
+  "publishers": [
+    {
+      "key_id": "erasmus-release-2026-01",
+      "owner": "repository release authority",
+      "public_key": "BaK2QoF6G8aY9YHZSdPzax8RsJuO/YfFqGSXa8mt8Q4=",
+      "status": "trusted"
+    }
+  ]
+}

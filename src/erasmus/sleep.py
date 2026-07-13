@@ -137,6 +137,8 @@ def decide_candidate(
     ).fetchone()
     if candidate is None:
         raise SleepError(f"sleep candidate not found: {candidate_id}")
+    if not _normalize_content(candidate["content"]):
+        raise SleepError("candidate content is invalid after normalization")
     expected_target = {
         "proposition_change": "belief",
         "behavioral_lesson": "skill",
@@ -349,13 +351,16 @@ def _defer_adaptations(store: Store, run_id: int) -> int:
     ).fetchall()
     with store.db:
         for row in rows:
+            lesson = _normalize_content(row["content"])
+            if not lesson:
+                continue
             cursor = store.db.execute(
                 """
                 INSERT OR IGNORE INTO experience_candidates(
                     lesson, status, created_at, source_event_id
                 ) VALUES(?, 'candidate', CURRENT_TIMESTAMP, ?)
                 """,
-                (row["content"], row["event_id"]),
+                (lesson, row["event_id"]),
             )
             created += cursor.rowcount
     return created

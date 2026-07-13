@@ -230,6 +230,47 @@ def test_unclean_running_run_resumes_without_loss(tmp_path, monkeypatch):
     assert reopened.db.execute("SELECT COUNT(*) FROM experience_candidates").fetchone()[0] == 1
 
 
+def test_resumed_legacy_candidate_is_revalidated_before_deferral_or_promotion(tmp_path):
+    store = _store(tmp_path)
+    event_id = store.add_event("correction", " \t ")
+    with store.db:
+        run = store.db.execute(
+            """
+            INSERT INTO sleep_runs(
+                version, status, current_stage, start_event_id, end_event_id
+            ) VALUES('1.0.0', 'running', 'reconcile', ?, ?)
+            """,
+            (event_id, event_id),
+        )
+        run_id = int(run.lastrowid)
+        store.db.execute(
+            """
+            INSERT INTO sleep_items(
+                run_id, event_id, source_class, candidate_type, disposition, reason
+            ) VALUES(?, ?, 'reviewer', 'behavioral_lesson', 'deferred', 'legacy')
+            """,
+            (run_id, event_id),
+        )
+        candidate = store.db.execute(
+            """
+            INSERT INTO sleep_candidates(
+                event_id, candidate_type, content, provenance_json, initial_disposition
+            ) VALUES(?, 'behavioral_lesson', '   ', '{}', 'deferred')
+            """,
+            (event_id,),
+        )
+        candidate_id = int(candidate.lastrowid)
+
+    result = consolidate(store)
+    assert result["run_id"] == run_id
+    assert result["experience_candidates"] == 0
+    with pytest.raises(SleepError, match="invalid after normalization"):
+        decide_candidate(
+            store, candidate_id, "approved", "skill", _evidence(store),
+            "reviewer", "sleep:promote", "must still fail",
+        )
+
+
 def test_report_failure_does_not_reclassify_completed_run(tmp_path, monkeypatch):
     store = _store(tmp_path)
     event_id = store.add_event("correction", "durable before rendering")

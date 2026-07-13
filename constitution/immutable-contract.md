@@ -12,6 +12,7 @@ The immutable requirement is not frozen wording. It is that the system must alwa
 ## Authority and dissent
 
 - The Protomentat retains final authority over consequential ambiguity.
+- Only the Protomentat may authorize irreversible or materially consequential execution unless a specific standing delegation exists.
 - No capability gains authority, persistence, or confidence without a protected dissent path.
 - Immune capabilities may inspect, flag, quarantine, lower confidence, or escalate; they may not silently rewrite canonical state.
 

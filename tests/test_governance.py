@@ -681,10 +681,18 @@ class TestImmutableContract:
             path.name for path in (self._ROOT / "constitution").iterdir()
         }
         docs_files = {path.name for path in (self._ROOT / "docs").iterdir()}
-        assert "immutable-contract.md" in constitution_files, constitution_files
-        assert "architecture.md" in docs_files, docs_files
+        contract_matches = {
+            name for name in constitution_files
+            if name.casefold() == "immutable-contract.md"
+        }
+        architecture_matches = {
+            name for name in docs_files if name.casefold() == "architecture.md"
+        }
+        assert contract_matches == {"immutable-contract.md"}, constitution_files
+        assert architecture_matches == {"architecture.md"}, docs_files
 
     def test_required_immutable_invariants_are_present(self):
+        assert self._CONTRACT.is_file(), f"missing immutable contract: {self._CONTRACT}"
         content = self._CONTRACT.read_text(encoding="utf-8")
         required = (
             "## Epistemic integrity",
@@ -694,6 +702,7 @@ class TestImmutableContract:
             "## Provenance and reversibility",
             "Evidence outranks confidence and agreement.",
             "The Protomentat retains final authority over consequential ambiguity.",
+            "Only the Protomentat may authorize irreversible or materially consequential execution",
             "remain logically separate",
             "Every capability declares typed input and output",
             "one process and one SQLite database",

@@ -19,10 +19,12 @@ from erasmus.capability_runtime import (
     validate_json_schema,
 )
 from erasmus.checkpoint import load_latest_checkpoint
+from erasmus.context import assemble_context, retrieve_fts
 from erasmus.immune import ImmuneCascade
 from erasmus.ledger import EpistemicLedger
 from erasmus.missions import MissionEngine, create_mission
 from erasmus.review import tenth_man_prompt
+from erasmus.runtime import LocalRuntimeConfig, OpenAICompatibleRuntime, run_session
 from erasmus.sleep import consolidate, decide_candidate, sleep_report
 from erasmus.store import Store
 from erasmus.tool_registry import (
@@ -53,6 +55,25 @@ def main() -> None:
     sleep_decide.add_argument("--reason", required=True)
     sub.add_parser("checkpoint")
     sub.add_parser("integrity")
+
+    for command in ("runtime-validate", "runtime-discover"):
+        runtime_command = sub.add_parser(command)
+        runtime_command.add_argument("config")
+    runtime_smoke = sub.add_parser("runtime-smoke")
+    runtime_smoke.add_argument("config")
+    runtime_smoke.add_argument("--prompt", required=True)
+    runtime_smoke.add_argument(
+        "--constitution", default="constitution/immutable-contract.md"
+    )
+    runtime_smoke.add_argument(
+        "--prompt-artifact", default="prompts/session-system-v1.txt"
+    )
+    runtime_smoke.add_argument("--fts-db")
+    runtime_smoke.add_argument("--fts-table")
+    runtime_smoke.add_argument("--fts-query")
+    runtime_embed = sub.add_parser("runtime-embed")
+    runtime_embed.add_argument("config")
+    runtime_embed.add_argument("text", nargs="+")
 
     mission = sub.add_parser("mission-create")
     mission.add_argument("--contract")
@@ -231,6 +252,8 @@ def main() -> None:
             "immune_incidents",
             "immune_findings",
             "checkpoints",
+            "local_runtime_sessions",
+            "runtime_identity_changes",
             "sessions",
             "capabilities",
             "capability_plans",
@@ -276,6 +299,42 @@ def main() -> None:
     elif args.cmd == "integrity":
         results = store.integrity_check()
         print(json.dumps(results, indent=2))
+
+    elif args.cmd == "runtime-validate":
+        config = _local_runtime_config(args.config)
+        print(json.dumps({"valid": True, "config": _runtime_identity(config)}, indent=2))
+
+    elif args.cmd == "runtime-discover":
+        runtime = OpenAICompatibleRuntime(_local_runtime_config(args.config))
+        print(json.dumps(runtime.discover(), indent=2))
+
+    elif args.cmd == "runtime-smoke":
+        config = _local_runtime_config(args.config)
+        supplied_fts = (args.fts_db, args.fts_table, args.fts_query)
+        if any(supplied_fts) and not all(supplied_fts):
+            raise SystemExit("runtime-smoke requires --fts-db, --fts-table, and --fts-query together")
+        evidence = []
+        if all(supplied_fts):
+            evidence = retrieve_fts(
+                query_sqlite_fts([Path.cwd()]), database=args.fts_db,
+                table=args.fts_table, query=args.fts_query,
+            )
+        context = assemble_context(
+            store,
+            constitution=Path(args.constitution).read_text(encoding="utf-8"),
+            prompt_artifact=Path(args.prompt_artifact).read_text(encoding="utf-8"),
+            budgets=config.budgets,
+            retrieved_evidence=evidence,
+        )
+        print(json.dumps(
+            run_session(store, OpenAICompatibleRuntime(config), context, args.prompt),
+            indent=2,
+        ))
+
+    elif args.cmd == "runtime-embed":
+        runtime = OpenAICompatibleRuntime(_local_runtime_config(args.config))
+        runtime.discover()
+        print(json.dumps({"embeddings": runtime.embeddings(args.text)}, indent=2))
 
     elif args.cmd == "mission-create":
         if args.contract:
@@ -565,6 +624,23 @@ def _executable_mission_engine(store: Store, mission_id: int) -> MissionEngine:
         runtime.configure(capability_id, version, implementation, "1.0.0", handler)
         configured.add((capability_id, version))
     return MissionEngine(store, runtime)
+
+
+def _local_runtime_config(path: str) -> LocalRuntimeConfig:
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return LocalRuntimeConfig.from_mapping(raw)
+
+
+def _runtime_identity(config: LocalRuntimeConfig) -> dict[str, object]:
+    return {
+        "base_url": config.base_url,
+        "runtime_kind": config.runtime_kind,
+        "model": config.model,
+        "adapter": config.adapter,
+        "supports_embeddings": config.supports_embeddings,
+        "context_budget": config.context_budget,
+        "section_budgets": dict(config.section_budgets),
+    }
 
 
 if __name__ == "__main__":

@@ -40,9 +40,44 @@ erasmus --db state\erasmus.db status
 #   "immune_findings": 0,
 #   "checkpoints": 0,
 #   "sessions": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+#   "local_runtime_sessions": 0,
+#   "runtime_identity_changes": 0,
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
 # }
 ```
+
+## Local model runtime verification
+
+Start either mistral.rs or llama.cpp with its OpenAI-compatible HTTP endpoint,
+then copy `configs\local-runtime.example.json` and set `base_url`, `model`, and
+`runtime_kind`. No cloud catalogue, API key, or OAuth flow is used.
+
+```powershell
+$config = "configs\local-runtime.example.json"
+$db = "state\local-runtime.db"
+
+erasmus --db $db init
+erasmus --db $db runtime-validate $config
+erasmus --db $db runtime-discover $config
+erasmus --db $db runtime-smoke $config --prompt "Summarise the active context."
+
+# Optional, only when discovery advertises embedding support and the config
+# explicitly sets supports_embeddings to true.
+erasmus --db $db runtime-embed $config "bounded local evidence"
+
+python -m pytest tests\test_local_runtime.py -v
+```
+
+The smoke command assembles constitution, checkpoint, active propositions,
+candidate adaptations, retrieved evidence, and recent dialogue under explicit
+per-section and global budgets. Only the prompt artifact and constitution have
+system authority. Model/adapter identity, context omissions, source references,
+successes, failures, and cancellations are append-only journal records.
+
+To exercise existing SQLite FTS retrieval, add `--fts-db`, `--fts-table`, and
+`--fts-query` together. The database must be under the current working directory.
+Rollback is a code rollback plus restoration of the pre-migration database
+backup; do not delete migration 13 audit rows from a live database.
 
 ## Database integrity check
 

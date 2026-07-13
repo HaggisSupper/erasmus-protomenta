@@ -22,6 +22,10 @@ The system combines bounded conversational continuity, deterministic-first capab
 - `erasmus sleep-report <run-id>` — inspect classifications, reasons, and stage history
 - `erasmus sleep-decide ...` — record an evidence-backed belief or skill decision
 - `erasmus checkpoint` — JSON-dump the latest committed checkpoint
+- `erasmus runtime-validate configs/local-runtime.example.json` — validate a local endpoint configuration
+- `erasmus runtime-discover configs/local-runtime.example.json` — list models and advertised capabilities
+- `erasmus runtime-smoke configs/local-runtime.example.json --prompt "hello"` — run one bounded, provenance-aware local session
+- `erasmus runtime-embed configs/local-runtime.example.json "text"` — request embeddings when advertised
 - `erasmus ledger-evidence-add ...` — append provenance-bearing evidence
 - `erasmus ledger-propose ...` / `ledger-transition ...` — make explicit belief changes
 - `erasmus ledger-inspect <id>` / `ledger-query <id>` — inspect history and evidence

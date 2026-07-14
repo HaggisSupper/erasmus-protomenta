@@ -25,6 +25,8 @@ class HeadlessSpec:
     xlora: str | None = None
     xlora_order: str | None = None
     target_non_granular_index: int | None = None
+    model_format: str | None = None
+    quantized_file: str | None = None
 
     def __post_init__(self) -> None:
         if self.backend not in BACKENDS:
@@ -60,6 +62,10 @@ def build_command(spec: HeadlessSpec, prompt: str) -> tuple[str, ...]:
     if spec.backend == "ollama":
         return (executable, "run", spec.model, prompt, "--nowordwrap")
     command = [executable, "run", "auto", "--model-id", spec.model]
+    if spec.model_format:
+        command.extend(("--format", spec.model_format))
+    if spec.quantized_file:
+        command.extend(("--quantized-file", spec.quantized_file))
     _append_adapters(command, spec)
     return tuple(command)
 
@@ -143,6 +149,10 @@ class MistralRsLifecycle:
             raise RuntimeError("mistral.rs lifecycle is already running")
         command = [self.spec.executable or "mistralrs", "serve", "auto",
                    "--model-id", self.spec.model, "--port", str(self.spec.port), "--no-ui"]
+        if self.spec.model_format:
+            command.extend(("--format", self.spec.model_format))
+        if self.spec.quantized_file:
+            command.extend(("--quantized-file", self.spec.quantized_file))
         _append_adapters(command, self.spec)
         self._process = self._popen(command, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,

@@ -6,7 +6,8 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from queue import Queue
+from threading import Thread
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
@@ -107,20 +108,20 @@ class HeadlessRouter:
             raise ValueError("at least one headless runtime is required")
         results: list[HeadlessResult] = []
         failures: list[str] = []
-        pool = ThreadPoolExecutor(max_workers=len(specs), thread_name_prefix="erasmus-headless")
-        futures = {pool.submit(self.runner, spec, prompt, timeout_seconds): spec for spec in specs}
-        pending = set(futures)
-        while pending and not results:
-            done, pending = wait(pending, return_when=FIRST_COMPLETED)
-            for future in done:
-                spec = futures[future]
-                try:
-                    results.append(future.result())
-                except Exception as error:  # one backend cannot poison the router
-                    failures.append(f"{spec.backend}/{spec.model}: {error}")
-        for future in pending:
-            future.cancel()
-        pool.shutdown(wait=False, cancel_futures=True)
+        outcomes: Queue[tuple[HeadlessSpec, HeadlessResult | Exception]] = Queue()
+        def run(spec: HeadlessSpec) -> None:
+            try:
+                outcomes.put((spec, self.runner(spec, prompt, timeout_seconds)))
+            except Exception as error:  # one backend cannot poison the router
+                outcomes.put((spec, error))
+        for spec in specs:
+            Thread(target=run, args=(spec,), daemon=True, name=f"erasmus-headless-{spec.backend}").start()
+        for _ in specs:
+            spec, outcome = outcomes.get()
+            if isinstance(outcome, HeadlessResult):
+                results.append(outcome)
+                break
+            failures.append(f"{spec.backend}/{spec.model}: {outcome}")
         if not results:
             raise RuntimeError("all headless runtimes failed: " + "; ".join(sorted(failures)))
         return min(results, key=lambda result: (

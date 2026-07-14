@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import os
 import subprocess
+import warnings
 
 import pytest
 
@@ -61,6 +62,13 @@ def test_xlora_is_rejected_for_non_mistralrs_backends():
         HeadlessSpec("llama_cpp", "model.gguf", xlora="adapter")
     with pytest.raises(HeadlessConfigurationError, match="only by the mistralrs backend"):
         HeadlessSpec("lmstudio", "model", xlora_order="order.json")
+
+
+def test_xlora_is_deprecated_for_mistralrs():
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        HeadlessSpec("mistralrs", "model", xlora="adapter")
+    assert any(item.category is DeprecationWarning for item in caught)
 
 
 def test_mistralrs_server_command_places_server_flags_before_subcommand():

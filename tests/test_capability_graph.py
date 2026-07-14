@@ -298,7 +298,7 @@ def test_constraint_migrations_are_retryable_and_preserve_valid_rows():
         "INSERT INTO capability_edges VALUES('source', '1', 'requires', 'target', '1')"
     )
     db.commit()
-    assert apply_migrations(db) == [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    assert apply_migrations(db) == [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     assert db.execute("SELECT edge_type FROM capability_edges").fetchone() == ("requires",)
     assert db.execute("SELECT result FROM capability_evidence").fetchone() == ("success",)
     with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):

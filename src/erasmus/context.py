@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Callable, Mapping, Sequence
 
 from erasmus.checkpoint import load_latest_checkpoint
+from erasmus.skills import active_skills
 from erasmus.store import Store
 
 
@@ -102,12 +103,7 @@ def assemble_context(
         ORDER BY p.id DESC LIMIT 100
         """
     ).fetchall()
-    adaptations = store.db.execute(
-        """
-        SELECT id, lesson, evidence_count, status, source_event_id
-        FROM experience_candidates ORDER BY id DESC LIMIT 100
-        """
-    ).fetchall()
+    adaptations = active_skills(store)
 
     evidence_lines: list[str] = []
     evidence_refs: list[str] = []
@@ -138,7 +134,8 @@ def assemble_context(
             f"{row['id']} [{row['status']}] {row['statement']}" for row in propositions
         ),
         "adaptations": "\n".join(
-            f"{row['id']} [{row['status']}] {row['lesson']} (evidence={row['evidence_count']})"
+            f"{row['id']}@{row['version']} trigger={row['trigger']} "
+            f"behavior={row['behavior']} exclusions={json.dumps(row['exclusions'])}"
             for row in adaptations
         ),
         "evidence": "\n".join(evidence_lines),
@@ -148,7 +145,7 @@ def assemble_context(
         "constitution": "system",
         "checkpoint": "reference",
         "propositions": "reference",
-        "adaptations": "candidate_reference",
+        "adaptations": "approved_skill",
         "evidence": "untrusted_evidence",
         "dialogue": "recent_dialogue",
     }

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 
-BACKENDS = frozenset({"lmstudio", "mistralrs", "ollama"})
+BACKENDS = frozenset({"lmstudio", "mistralrs", "ollama", "llama_cpp"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,12 +55,14 @@ def build_command(spec: HeadlessSpec, prompt: str) -> tuple[str, ...]:
     """Build an argv tuple; prompt content is never shell-interpolated."""
     if not isinstance(prompt, str):
         raise ValueError("prompt must be text")
-    executable = spec.executable or {"lmstudio": "lms", "mistralrs": "mistralrs", "ollama": "ollama"}[spec.backend]
+    executable = spec.executable or {"lmstudio": "lms", "mistralrs": "mistralrs", "ollama": "ollama", "llama_cpp": "llama-cli"}[spec.backend]
     if spec.backend == "lmstudio":
         return (executable, "chat", spec.model, "--prompt", prompt,
                 "--dont-fetch-catalog", "--yes")
     if spec.backend == "ollama":
         return (executable, "run", spec.model, prompt, "--nowordwrap")
+    if spec.backend == "llama_cpp":
+        return (executable, "--model", spec.model, "--prompt", prompt, "--no-display-prompt", "--simple-io")
     command = [executable, "run", "auto", "--model-id", spec.model]
     if spec.model_format:
         command.extend(("--format", spec.model_format))

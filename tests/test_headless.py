@@ -25,6 +25,10 @@ def test_builds_headless_commands_without_shell_interpolation():
     assert build_command(HeadlessSpec("ollama", "qwen3:4b"), "hello world") == (
         "ollama", "run", "qwen3:4b", "hello world", "--nowordwrap",
     )
+    assert build_command(HeadlessSpec("llama_cpp", "model.gguf"), "hello world") == (
+        "llama-cli", "--model", "model.gguf", "--prompt", "hello world",
+        "--no-display-prompt", "--simple-io",
+    )
     assert build_command(HeadlessSpec("mistralrs", "Qwen/Qwen3-4B"), "hello world") == (
         "mistralrs", "run", "auto", "--model-id", "Qwen/Qwen3-4B",
     )

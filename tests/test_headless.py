@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+import warnings
 from threading import Event, Lock
 
 import pytest
@@ -51,6 +52,13 @@ def test_xlora_is_rejected_for_non_mistralrs_backends():
         HeadlessSpec("llama_cpp", "model.gguf", xlora="adapter")
     with pytest.raises(ValueError, match="only by the mistralrs backend"):
         HeadlessSpec("lmstudio", "model", xlora_order="order.json")
+
+
+def test_xlora_is_deprecated_for_mistralrs():
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        HeadlessSpec("mistralrs", "model", xlora="adapter")
+    assert any(item.category is DeprecationWarning for item in caught)
 
 
 def test_router_runs_candidates_concurrently_and_selects_fastest_success():

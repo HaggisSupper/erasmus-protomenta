@@ -6,6 +6,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import warnings
 from queue import Queue
 from threading import Thread
 from dataclasses import dataclass, field
@@ -44,6 +45,12 @@ class HeadlessSpec:
             raise ValueError("XLora adapter path must be non-empty")
         if (self.xlora or self.xlora_order or self.target_non_granular_index is not None) and self.backend != "mistralrs":
             raise ValueError("X-LoRA is supported only by the mistralrs backend")
+        if self.xlora or self.xlora_order or self.target_non_granular_index is not None:
+            warnings.warn(
+                "X-LoRA support is deprecated; use standard LoRA adapters or an external adapter runtime",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass(frozen=True, slots=True)

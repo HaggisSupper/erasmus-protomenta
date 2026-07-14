@@ -42,7 +42,12 @@ erasmus --db state\erasmus.db status
 #   "sessions": 0,
 #   "local_runtime_sessions": 0,
 #   "runtime_identity_changes": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+#   "skill_observations": 0,
+#   "skill_artifacts": 0,
+#   "skill_transitions": 0,
+#   "skill_evaluations": 0,
+#   "adapter_readiness_exports": 0,
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 # }
 ```
 
@@ -69,7 +74,7 @@ python -m pytest tests\test_local_runtime.py -v
 ```
 
 The smoke command assembles constitution, checkpoint, active propositions,
-candidate adaptations, retrieved evidence, and recent dialogue under explicit
+approved behavioral skills, retrieved evidence, and recent dialogue under explicit
 per-section and global budgets. Only the prompt artifact and constitution have
 system authority. Model/adapter identity, context omissions, source references,
 successes, failures, and cancellations are append-only journal records.
@@ -431,3 +436,43 @@ retains both source references, while prior thresholds and results remain audita
 Low-prior novelty alone does not wake investigators without consequence or a
 risk feature. Rollback deactivates the optional capability and reverts code;
 restore the pre-migration-15 backup to remove the additive schema offline.
+
+## Skill promotion and adapter-readiness verification
+
+Mission 09 keeps the existing sleep decision as the mandatory ingress gate.
+Two clean successful source interactions are required before a human can draft
+a versioned skill. Held-out fixtures deterministically compare factual accuracy,
+dissent preservation, sycophancy, and overconfidence across intent inference,
+false equivalence, anti-sycophancy, doubt placement, and cut/stop decisions.
+
+```powershell
+python -m pytest tests\test_skills.py -v
+
+# candidate 1 must already have an approved sleep promotion to target "skill".
+erasmus --db state\skills.db skill-observe 1 20 30 `
+  --intervention clarify_then_answer --effect "intent resolved" --outcome success `
+  --confidence 0.8 --actor reviewer --authority skill:promote
+# Use a distinct source interaction and evidence record for the second success.
+erasmus --db state\skills.db skill-observe 1 21 31 `
+  --intervention clarify_then_answer --effect "intent resolved again" --outcome success `
+  --confidence 0.8 --actor reviewer --authority skill:promote
+erasmus --db state\skills.db skill-promote 1 repeated_evidence `
+  --actor reviewer --authority skill:promote --reason "two clean successes"
+erasmus --db state\skills.db skill-draft 1 skill-artifact.json `
+  --actor reviewer --authority skill:promote --reason "inspectable draft"
+erasmus --db state\skills.db skill-evaluate 1 held-out-fixtures.json `
+  --actor reviewer --authority skill:promote --reason "held-out comparison"
+erasmus --db state\skills.db skill-promote 1 approved `
+  --actor protomentat --authority skill:promote --reason "benefit without regression"
+erasmus --db state\skills.db skill-inspect 1
+erasmus --db state\skills.db skill-export `
+  --actor reviewer --authority skill:export > adapter-readiness.json
+```
+
+Only candidates in the latest `approved` state enter runtime context or the
+readiness manifest. Rejected, retired, contaminated, quarantined, and ungated
+material remains auditable but inactive. The export records hashes and
+provenance and always reports `training_performed: false`; no trainer is called.
+Rollback retires active skills, reverts the code, and restores a pre-migration-16
+backup on an offline copy if the additive schema must be removed. Never delete
+live skill observation, artifact, transition, evaluation, or export rows.

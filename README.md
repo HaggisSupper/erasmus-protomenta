@@ -32,6 +32,7 @@ The system combines bounded conversational continuity, deterministic-first capab
 - `erasmus immune-process <event.json> --authority immune:inspect` — run the immune cascade
 - `erasmus immune-inspect <id>` / `immune-agents` — inspect incidents and dormant state
 - `erasmus divergence-calibrate ...` / `divergence-evaluate ...` — calibrate and evaluate inspectable divergence detectors
+- `erasmus skill-inspect <candidate-id>` / `skill-export ...` — inspect promoted skills and adapter readiness
 - `erasmus integrity` — run `PRAGMA integrity_check`
 - `erasmus backup <dest>` — hot-backup the database to a file
 - `erasmus restore <src>` — restore from a backup file

@@ -928,6 +928,135 @@ MIGRATIONS: list[tuple[int, str]] = [
         WHERE false_positive_recommendation_id IS NOT NULL;
         """,
     ),
+    (
+        16,
+        # Evidence-gated behavioral skills, deterministic held-out evaluation,
+        # and adapter-readiness exports. No training state is introduced.
+        """
+        CREATE TABLE skill_observations(
+            id INTEGER PRIMARY KEY,
+            candidate_id INTEGER NOT NULL,
+            source_event_id INTEGER NOT NULL,
+            evidence_id INTEGER NOT NULL,
+            intervention_mode TEXT NOT NULL,
+            observed_effect TEXT NOT NULL,
+            outcome TEXT NOT NULL CHECK(outcome IN ('success', 'failure')),
+            contamination_status TEXT NOT NULL CHECK(
+                contamination_status IN ('clean', 'quarantined', 'contaminated')
+            ),
+            confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+            actor TEXT NOT NULL,
+            authority TEXT NOT NULL CHECK(authority = 'skill:promote'),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(candidate_id, source_event_id),
+            FOREIGN KEY(candidate_id) REFERENCES experience_candidates(id),
+            FOREIGN KEY(source_event_id) REFERENCES events(id),
+            FOREIGN KEY(evidence_id) REFERENCES epistemic_evidence(id)
+        );
+        CREATE TABLE skill_artifacts(
+            id INTEGER PRIMARY KEY,
+            candidate_id INTEGER NOT NULL,
+            version TEXT NOT NULL,
+            trigger_text TEXT NOT NULL,
+            behavior_text TEXT NOT NULL,
+            exclusions_json TEXT NOT NULL,
+            examples_json TEXT NOT NULL,
+            counterexamples_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            rollback_text TEXT NOT NULL,
+            artifact_hash TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            authority TEXT NOT NULL CHECK(authority = 'skill:promote'),
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(candidate_id, version),
+            FOREIGN KEY(candidate_id) REFERENCES experience_candidates(id)
+        );
+        CREATE TABLE skill_transitions(
+            id INTEGER PRIMARY KEY,
+            candidate_id INTEGER NOT NULL,
+            artifact_id INTEGER,
+            from_state TEXT NOT NULL CHECK(from_state IN (
+                'candidate', 'repeated_evidence', 'drafted_skill',
+                'held_out_evaluation', 'approved', 'rejected', 'retired'
+            )),
+            to_state TEXT NOT NULL CHECK(to_state IN (
+                'candidate', 'repeated_evidence', 'drafted_skill',
+                'held_out_evaluation', 'approved', 'rejected', 'retired'
+            )),
+            actor TEXT NOT NULL,
+            authority TEXT NOT NULL CHECK(authority = 'skill:promote'),
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(candidate_id) REFERENCES experience_candidates(id),
+            FOREIGN KEY(artifact_id) REFERENCES skill_artifacts(id)
+        );
+        CREATE TABLE skill_evaluations(
+            id INTEGER PRIMARY KEY,
+            artifact_id INTEGER NOT NULL UNIQUE,
+            fixtures_json TEXT NOT NULL,
+            fixtures_hash TEXT NOT NULL,
+            baseline_metrics_json TEXT NOT NULL,
+            skill_metrics_json TEXT NOT NULL,
+            benefit_json TEXT NOT NULL,
+            regressions_json TEXT NOT NULL,
+            passed INTEGER NOT NULL CHECK(passed IN (0, 1)),
+            actor TEXT NOT NULL,
+            authority TEXT NOT NULL CHECK(authority = 'skill:promote'),
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(artifact_id) REFERENCES skill_artifacts(id)
+        );
+        CREATE TABLE adapter_readiness_exports(
+            id INTEGER PRIMARY KEY,
+            version TEXT NOT NULL,
+            manifest_json TEXT NOT NULL,
+            manifest_hash TEXT NOT NULL,
+            report_json TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            authority TEXT NOT NULL CHECK(authority = 'skill:export'),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TRIGGER experience_candidate_status_insert
+        BEFORE INSERT ON experience_candidates
+        WHEN NEW.status NOT IN (
+            'candidate', 'repeated_evidence', 'drafted_skill',
+            'held_out_evaluation', 'approved', 'rejected', 'retired'
+        ) BEGIN SELECT RAISE(ABORT, 'invalid experience candidate status'); END;
+        CREATE TRIGGER experience_candidate_status_update
+        BEFORE UPDATE OF status ON experience_candidates
+        WHEN NEW.status NOT IN (
+            'candidate', 'repeated_evidence', 'drafted_skill',
+            'held_out_evaluation', 'approved', 'rejected', 'retired'
+        ) BEGIN SELECT RAISE(ABORT, 'invalid experience candidate status'); END;
+        CREATE TRIGGER experience_candidates_no_delete
+        BEFORE DELETE ON experience_candidates
+        BEGIN SELECT RAISE(ABORT, 'experience candidates are append-only'); END;
+        CREATE TRIGGER skill_observations_no_update BEFORE UPDATE ON skill_observations
+        BEGIN SELECT RAISE(ABORT, 'skill observations are append-only'); END;
+        CREATE TRIGGER skill_observations_no_delete BEFORE DELETE ON skill_observations
+        BEGIN SELECT RAISE(ABORT, 'skill observations are append-only'); END;
+        CREATE TRIGGER skill_artifacts_no_update BEFORE UPDATE ON skill_artifacts
+        BEGIN SELECT RAISE(ABORT, 'skill artifacts are append-only'); END;
+        CREATE TRIGGER skill_artifacts_no_delete BEFORE DELETE ON skill_artifacts
+        BEGIN SELECT RAISE(ABORT, 'skill artifacts are append-only'); END;
+        CREATE TRIGGER skill_transitions_no_update BEFORE UPDATE ON skill_transitions
+        BEGIN SELECT RAISE(ABORT, 'skill transitions are append-only'); END;
+        CREATE TRIGGER skill_transitions_no_delete BEFORE DELETE ON skill_transitions
+        BEGIN SELECT RAISE(ABORT, 'skill transitions are append-only'); END;
+        CREATE TRIGGER skill_evaluations_no_update BEFORE UPDATE ON skill_evaluations
+        BEGIN SELECT RAISE(ABORT, 'skill evaluations are append-only'); END;
+        CREATE TRIGGER skill_evaluations_no_delete BEFORE DELETE ON skill_evaluations
+        BEGIN SELECT RAISE(ABORT, 'skill evaluations are append-only'); END;
+        CREATE TRIGGER adapter_readiness_exports_no_update
+        BEFORE UPDATE ON adapter_readiness_exports
+        BEGIN SELECT RAISE(ABORT, 'adapter readiness exports are append-only'); END;
+        CREATE TRIGGER adapter_readiness_exports_no_delete
+        BEFORE DELETE ON adapter_readiness_exports
+        BEGIN SELECT RAISE(ABORT, 'adapter readiness exports are append-only'); END;
+        """,
+    ),
 ]
 
 

@@ -26,6 +26,7 @@ from erasmus.ledger import EpistemicLedger
 from erasmus.missions import MissionEngine, create_mission
 from erasmus.review import tenth_man_prompt
 from erasmus.runtime import LocalRuntimeConfig, OpenAICompatibleRuntime, run_session
+from erasmus.skills import SkillPromotionEngine
 from erasmus.sleep import consolidate, decide_candidate, sleep_report
 from erasmus.store import Store
 from erasmus.tool_registry import (
@@ -136,6 +137,40 @@ def main() -> None:
     divergence_downweight.add_argument("--actor", required=True)
     divergence_downweight.add_argument("--reason", required=True)
     divergence_downweight.add_argument("--authority", required=True)
+    skill_observe = sub.add_parser("skill-observe")
+    skill_observe.add_argument("candidate_id", type=int)
+    skill_observe.add_argument("source_event_id", type=int)
+    skill_observe.add_argument("evidence_id", type=int)
+    skill_observe.add_argument("--intervention", required=True)
+    skill_observe.add_argument("--effect", required=True)
+    skill_observe.add_argument("--outcome", choices=("success", "failure"), required=True)
+    skill_observe.add_argument(
+        "--contamination", choices=("clean", "quarantined", "contaminated"),
+        default="clean",
+    )
+    skill_observe.add_argument("--confidence", type=float, required=True)
+    skill_observe.add_argument("--actor", required=True)
+    skill_observe.add_argument("--authority", required=True)
+    skill_promote = sub.add_parser("skill-promote")
+    skill_promote.add_argument("candidate_id", type=int)
+    skill_promote.add_argument(
+        "target", choices=("repeated_evidence", "approved", "rejected", "retired")
+    )
+    skill_promote.add_argument("--actor", required=True)
+    skill_promote.add_argument("--authority", required=True)
+    skill_promote.add_argument("--reason", required=True)
+    for command in ("skill-draft", "skill-evaluate"):
+        skill_file = sub.add_parser(command)
+        skill_file.add_argument("candidate_id", type=int)
+        skill_file.add_argument("document")
+        skill_file.add_argument("--actor", required=True)
+        skill_file.add_argument("--authority", required=True)
+        skill_file.add_argument("--reason", required=True)
+    skill_inspect = sub.add_parser("skill-inspect")
+    skill_inspect.add_argument("candidate_id", type=int)
+    skill_export = sub.add_parser("skill-export")
+    skill_export.add_argument("--actor", required=True)
+    skill_export.add_argument("--authority", required=True)
 
     evidence_add = sub.add_parser("ledger-evidence-add")
     evidence_add.add_argument("content")
@@ -276,6 +311,11 @@ def main() -> None:
             "divergence_calibrations",
             "divergence_recommendations",
             "divergence_evaluations",
+            "skill_observations",
+            "skill_artifacts",
+            "skill_transitions",
+            "skill_evaluations",
+            "adapter_readiness_exports",
             "sessions",
             "capabilities",
             "capability_plans",
@@ -450,6 +490,43 @@ def main() -> None:
             args.authority,
         )
         print(json.dumps({"calibration_id": calibration_id}, indent=2))
+
+    elif args.cmd == "skill-observe":
+        observation_id = SkillPromotionEngine(store).observe(
+            args.candidate_id, source_event_id=args.source_event_id,
+            intervention_mode=args.intervention, observed_effect=args.effect,
+            outcome=args.outcome, contamination_status=args.contamination,
+            confidence=args.confidence, evidence_id=args.evidence_id,
+            actor=args.actor, authority=args.authority,
+        )
+        print(json.dumps({"observation_id": observation_id}, indent=2))
+
+    elif args.cmd == "skill-promote":
+        transition_id = SkillPromotionEngine(store).promote(
+            args.candidate_id, args.target, args.actor, args.authority, args.reason
+        )
+        print(json.dumps({"transition_id": transition_id}, indent=2))
+
+    elif args.cmd == "skill-draft":
+        artifact = json.loads(Path(args.document).read_text(encoding="utf-8"))
+        artifact_id = SkillPromotionEngine(store).draft(
+            args.candidate_id, artifact, args.actor, args.authority, args.reason
+        )
+        print(json.dumps({"artifact_id": artifact_id}, indent=2))
+
+    elif args.cmd == "skill-evaluate":
+        fixtures = json.loads(Path(args.document).read_text(encoding="utf-8"))
+        print(json.dumps(SkillPromotionEngine(store).evaluate(
+            args.candidate_id, fixtures, args.actor, args.authority, args.reason
+        ), indent=2))
+
+    elif args.cmd == "skill-inspect":
+        print(json.dumps(SkillPromotionEngine(store).inspect(args.candidate_id), indent=2))
+
+    elif args.cmd == "skill-export":
+        print(json.dumps(SkillPromotionEngine(store).export_readiness(
+            args.actor, args.authority
+        ), indent=2))
 
     elif args.cmd == "ledger-evidence-add":
         evidence_id = EpistemicLedger(store).add_evidence(

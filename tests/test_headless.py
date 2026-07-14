@@ -61,12 +61,14 @@ def test_router_runs_candidates_concurrently_and_selects_fastest_success():
             active -= 1
         return HeadlessResult(spec=spec, content=prompt, latency_seconds=0.03 if spec.model == "fast" else 0.08)
 
+    started = time.monotonic()
     result = HeadlessRouter(runner).route(
         [HeadlessSpec("ollama", "slow"), HeadlessSpec("lmstudio", "fast")],
         "prompt", timeout_seconds=1,
     )
     assert result.spec.model == "fast"
     assert peak == 2
+    assert time.monotonic() - started < 0.07
 
 
 def test_router_fails_closed_when_all_candidates_fail():
@@ -105,6 +107,32 @@ def test_mistralrs_lifecycle_terminates_process():
     lifecycle.start(timeout_seconds=1)
     lifecycle.stop(timeout_seconds=1)
     assert process.terminated
+
+
+def test_mistralrs_lifecycle_does_not_pipe_stderr_by_default():
+    captured = {}
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout):
+            return 0
+
+    def popen(*args, **kwargs):
+        captured.update(kwargs)
+        return FakeProcess()
+
+    lifecycle = MistralRsLifecycle(
+        HeadlessSpec("mistralrs", "base"), popen=popen,
+        healthcheck=lambda spec, timeout: True,
+    )
+    lifecycle.start(timeout_seconds=1)
+    lifecycle.stop()
+    assert captured["stderr"] is __import__("subprocess").DEVNULL
 
 
 @pytest.mark.skipif(

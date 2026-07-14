@@ -6,7 +6,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
@@ -107,16 +107,20 @@ class HeadlessRouter:
             raise ValueError("at least one headless runtime is required")
         results: list[HeadlessResult] = []
         failures: list[str] = []
-        with ThreadPoolExecutor(max_workers=len(specs), thread_name_prefix="erasmus-headless") as pool:
-            futures = {
-                pool.submit(self.runner, spec, prompt, timeout_seconds): spec for spec in specs
-            }
-            for future in as_completed(futures):
+        pool = ThreadPoolExecutor(max_workers=len(specs), thread_name_prefix="erasmus-headless")
+        futures = {pool.submit(self.runner, spec, prompt, timeout_seconds): spec for spec in specs}
+        pending = set(futures)
+        while pending and not results:
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
                 spec = futures[future]
                 try:
                     results.append(future.result())
                 except Exception as error:  # one backend cannot poison the router
                     failures.append(f"{spec.backend}/{spec.model}: {error}")
+        for future in pending:
+            future.cancel()
+        pool.shutdown(wait=False, cancel_futures=True)
         if not results:
             raise RuntimeError("all headless runtimes failed: " + "; ".join(sorted(failures)))
         return min(results, key=lambda result: (
@@ -133,12 +137,14 @@ class MistralRsLifecycle:
         *,
         popen: Callable[..., subprocess.Popen] = subprocess.Popen,
         healthcheck: Callable[[HeadlessSpec, float], bool] | None = None,
+        capture_stderr: bool = False,
     ):
         if spec.backend != "mistralrs":
             raise ValueError("mistral.rs lifecycle requires a mistralrs spec")
         self.spec = spec
         self._popen = popen
         self._healthcheck = healthcheck or _healthcheck
+        self.capture_stderr = capture_stderr
         self._process: subprocess.Popen | None = None
         self.healthy = False
 
@@ -157,7 +163,8 @@ class MistralRsLifecycle:
             command.extend(("--quantized-file", self.spec.quantized_file))
         _append_adapters(command, self.spec)
         self._process = self._popen(command, stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE if self.capture_stderr else subprocess.DEVNULL,
                                     text=True)
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
@@ -206,5 +213,5 @@ def _healthcheck(spec: HeadlessSpec, timeout_seconds: float) -> bool:
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             return 200 <= response.status < 300
-    except (urllib.error.URLError, TimeoutError):
+    except (urllib.error.URLError, TimeoutError, OSError):
         return False

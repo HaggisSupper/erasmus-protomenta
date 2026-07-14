@@ -1,0 +1,23 @@
+{
+  "bundle_id": "sales-ieee-retrieval-v1",
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "sales_adapter": {
+    "repo": "bethelhem21/tenacious-judge-lora",
+    "purpose": "sales outreach safety and escalation review",
+    "license": "mit",
+    "requires_local_download": true
+  },
+  "ieee_retrieval": {
+    "source_dir": "state/ieee-documents",
+    "sqlite_db": "state/ieee-index.db",
+    "fts_table": "documents",
+    "source_policy": "licensed_documents_only",
+    "citation_required": true,
+    "training": false
+  },
+  "routing": {
+    "sales_review": "sales_adapter",
+    "standards_questions": "ieee_retrieval",
+    "pricing_calculation": "deterministic_rules"
+  }
+}

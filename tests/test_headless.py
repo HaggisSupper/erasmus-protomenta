@@ -46,6 +46,13 @@ def test_mistralrs_command_contains_lora_and_xlora_flags():
     )
 
 
+def test_xlora_is_rejected_for_non_mistralrs_backends():
+    with pytest.raises(ValueError, match="only by the mistralrs backend"):
+        HeadlessSpec("llama_cpp", "model.gguf", xlora="adapter")
+    with pytest.raises(ValueError, match="only by the mistralrs backend"):
+        HeadlessSpec("lmstudio", "model", xlora_order="order.json")
+
+
 def test_router_runs_candidates_concurrently_and_selects_fastest_success():
     active = 0
     peak = 0

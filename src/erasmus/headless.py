@@ -42,6 +42,8 @@ class HeadlessSpec:
             raise ValueError("LoRA adapter paths must be non-empty strings")
         if self.xlora is not None and not self.xlora.strip():
             raise ValueError("XLora adapter path must be non-empty")
+        if (self.xlora or self.xlora_order or self.target_non_granular_index is not None) and self.backend != "mistralrs":
+            raise ValueError("X-LoRA is supported only by the mistralrs backend")
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,6 +9,7 @@
   },
   "ieee_retrieval": {
     "source_dir": "state/ieee-documents",
+    "source_dir_env": "ERASMUS_IEEE_SOURCE_DIR",
     "sqlite_db": "state/ieee-index.db",
     "fts_table": "documents",
     "source_policy": "licensed_documents_only",

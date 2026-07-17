@@ -276,6 +276,19 @@ def test_run_headless_records_unexpected_exit(monkeypatch):
     assert "prompt" not in error.value.evidence.redacted_argv
 
 
+def test_run_headless_records_spawn_failure_without_prompt_evidence(monkeypatch):
+    def run(*args, **kwargs):
+        raise OSError("argument list too long")
+
+    monkeypatch.setattr("erasmus.headless.subprocess.run", run)
+    with pytest.raises(HeadlessExecutionError) as error:
+        from erasmus.headless import run_headless
+
+        run_headless(HeadlessSpec("mistralrs", "model"), "private prompt", timeout_seconds=1)
+    assert error.value.evidence.exit_code is None
+    assert "private prompt" not in error.value.evidence.redacted_argv
+
+
 @pytest.mark.skipif(
     not all(os.environ.get(name) for name in (
         "ERASMUS_MISTRALRS_MODEL", "ERASMUS_LORA_ADAPTER",

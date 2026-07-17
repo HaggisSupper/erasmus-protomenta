@@ -149,9 +149,12 @@ def run_headless(spec: HeadlessSpec, prompt: str, timeout_seconds: float) -> Hea
         )
     except subprocess.TimeoutExpired as error:
         raise TimeoutError(f"{spec.backend}/{spec.model} timed out") from error
+    except OSError as error:
+        evidence = HeadlessProcessEvidence(_redact_prompt_argv(command, prompt), None)
+        raise HeadlessExecutionError(f"{spec.backend}/{spec.model} failed to start: {error}", evidence) from error
     if completed.returncode != 0:
         evidence = HeadlessProcessEvidence(
-            tuple("<redacted>" if arg == prompt else arg for arg in command),
+            _redact_prompt_argv(command, prompt),
             completed.returncode,
             completed.stdout,
             completed.stderr,
@@ -312,6 +315,10 @@ def _healthcheck(spec: HeadlessSpec, timeout_seconds: float) -> bool:
 
 def _tail(text: str) -> str:
     return text[-TAIL_LIMIT:]
+
+
+def _redact_prompt_argv(argv: tuple[str, ...], prompt: str) -> tuple[str, ...]:
+    return tuple("<redacted>" if arg == prompt else arg for arg in argv)
 
 
 def _redact_arg(arg: str) -> str:

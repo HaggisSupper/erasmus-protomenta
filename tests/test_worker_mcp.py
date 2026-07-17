@@ -9,7 +9,7 @@ def test_root_allowlist_and_redaction():
     with patch("erasmus.worker_mcp.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess([], 0, "token=abc123", "")
         result = server.call("worker_health", {"project_root": str(tmp_path), "worker": "agy"})
-    assert result["advisory"] and "REDACTED" in result["output"]
+    assert not result["advisory"] and result["authorization"] == "local-write" and "REDACTED" in result["output"]
 
 def test_path_traversal_rejected():
     tmp_path = Path.cwd()

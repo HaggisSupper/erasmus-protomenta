@@ -24,11 +24,11 @@ class WorkerMcpServer:
         elif operation == "worker_health":
             argv = [command, "--help"]
         else:
-            argv = ([command, "--print", "--mode", "plan", "--sandbox", "danger-full-access", "--project", str(root), prompt] if command == "agy" else [command, "run", "--pure", "--auto", "--dir", str(root), prompt])
+            argv = ([command, "--print", "--mode", "accept-edits", "--sandbox", "danger-full-access", "--project", str(root), prompt] if command == "agy" else [command, "run", "--pure", "--auto", "--dir", str(root), prompt])
         try: result = subprocess.run(argv, cwd=root, shell=False, capture_output=True, text=True, timeout=self.timeout, env=os.environ.copy())
         except subprocess.TimeoutExpired as error: raise ValueError(f"worker timed out after {self.timeout}s") from error
         output = _redact((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
-        return {"operation": operation, "worker": command, "status": "ok" if result.returncode == 0 else "failed", "returncode": result.returncode, "advisory": True, "authorization": "none", "output": output[:20000]}
+        return {"operation": operation, "worker": command, "status": "ok" if result.returncode == 0 else "failed", "returncode": result.returncode, "advisory": False, "authorization": "local-write", "output": output[:20000]}
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in OPERATIONS: raise ValueError(f"unknown tool: {name}")
         return self._run(name, self._root(arguments.get("project_root")), arguments.get("prompt", "health check"), arguments.get("worker", "agy"))

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import io
+import os
 import subprocess
 
 import pytest
@@ -86,6 +86,24 @@ def test_router_fails_closed_when_all_candidates_fail():
         HeadlessRouter(runner).route(
             [HeadlessSpec("mistralrs", "missing")], "prompt", timeout_seconds=1
         )
+
+
+def test_router_passes_the_remaining_budget_to_each_fallback(monkeypatch):
+    clock = iter((100.0, 100.0, 100.4))
+    budgets = []
+
+    def runner(spec, prompt, timeout):
+        budgets.append(timeout)
+        if spec.model == "first":
+            raise RuntimeError("unavailable")
+        return HeadlessResult(spec=spec, content=prompt, latency_seconds=0.03)
+
+    monkeypatch.setattr("erasmus.headless.time.monotonic", lambda: next(clock))
+    HeadlessRouter(runner).route(
+        [HeadlessSpec("ollama", "first", priority=0), HeadlessSpec("lmstudio", "second", priority=1)],
+        "prompt", timeout_seconds=1,
+    )
+    assert budgets == [1.0, pytest.approx(0.6)]
 
 
 def test_mistralrs_lifecycle_terminates_process():
@@ -192,6 +210,17 @@ def test_mistralrs_lifecycle_records_startup_failure_evidence():
     assert lifecycle.state is LifecycleState.ERROR
 
 
+def test_mistralrs_lifecycle_records_spawn_failure_as_error():
+    def popen(*args, **kwargs):
+        raise FileNotFoundError("mistralrs")
+
+    lifecycle = MistralRsLifecycle(HeadlessSpec("mistralrs", "base"), popen=popen)
+    with pytest.raises(HeadlessExecutionError, match="failed to start") as error:
+        lifecycle.start(timeout_seconds=1)
+    assert error.value.evidence is lifecycle.evidence
+    assert lifecycle.state is LifecycleState.ERROR
+
+
 def test_mistralrs_lifecycle_timeout_cleans_up_process():
     class SlowProcess:
         def __init__(self):
@@ -244,6 +273,7 @@ def test_run_headless_records_unexpected_exit(monkeypatch):
         run_headless(HeadlessSpec("llama_cpp", "model.gguf"), "prompt", timeout_seconds=1)
     assert error.value.evidence.exit_code == 3
     assert error.value.evidence.stderr_tail == "boom"
+    assert "prompt" not in error.value.evidence.redacted_argv
 
 
 @pytest.mark.skipif(

@@ -151,7 +151,10 @@ def run_headless(spec: HeadlessSpec, prompt: str, timeout_seconds: float) -> Hea
         raise TimeoutError(f"{spec.backend}/{spec.model} timed out") from error
     if completed.returncode != 0:
         evidence = HeadlessProcessEvidence(
-            command, completed.returncode, completed.stdout, completed.stderr,
+            tuple("<redacted>" if arg == prompt else arg for arg in command),
+            completed.returncode,
+            completed.stdout,
+            completed.stderr,
         )
         detail = (evidence.stderr_tail or evidence.stdout_tail).strip()
         raise HeadlessExecutionError(f"{spec.backend}/{spec.model} failed: {detail}", evidence)
@@ -172,9 +175,13 @@ class HeadlessRouter:
             raise HeadlessConfigurationError("at least one headless runtime is required")
         failures: list[str] = []
         ordered = sorted(specs, key=lambda spec: (spec.priority, spec.backend, spec.model))
+        deadline = time.monotonic() + timeout_seconds
         for spec in ordered:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                return self.runner(spec, prompt, timeout_seconds)
+                return self.runner(spec, prompt, remaining)
             except Exception as error:  # one backend cannot poison the router
                 failures.append(f"{spec.backend}/{spec.model}: {error}")
         raise HeadlessExecutionError("all headless runtimes failed: " + "; ".join(failures))
@@ -214,10 +221,14 @@ class MistralRsLifecycle:
         self.state = LifecycleState.STARTING
         command = build_server_command(self.spec)
         self.evidence = HeadlessProcessEvidence(command, None)
-        self._process = self._popen(command, stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.PIPE if self.capture_stderr else subprocess.DEVNULL,
-                                    text=True)
+        try:
+            self._process = self._popen(command, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.PIPE if self.capture_stderr else subprocess.DEVNULL,
+                                        text=True)
+        except OSError as error:
+            self.state = LifecycleState.ERROR
+            raise HeadlessExecutionError(f"mistral.rs failed to start: {error}", self.evidence) from error
         self._start_stderr_drain()
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
@@ -254,8 +265,7 @@ class MistralRsLifecycle:
         finally:
             self._process = None
             self._join_stderr_drain()
-            if self.state is not LifecycleState.ERROR:
-                self.state = LifecycleState.STOPPED
+            self.state = LifecycleState.STOPPED
 
     def _start_stderr_drain(self) -> None:
         process = self._process
@@ -264,7 +274,7 @@ class MistralRsLifecycle:
 
         def drain() -> None:
             while True:
-                chunk = process.stderr.read(1)
+                chunk = process.stderr.read(1024)
                 if not chunk:
                     break
                 self._stderr_tail = _tail(self._stderr_tail + chunk)

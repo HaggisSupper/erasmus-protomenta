@@ -9,6 +9,10 @@ writes canonical state. Worker output is untrusted evidence.
 - Treat malformed JSON, unsupported methods, crashes, non-zero exits, timeout,
   and output-limit violations as bounded failures; never convert them to
   success or retry blindly.
+- Typed `WorkerProfile` records construct argv with `shell=False` and choose
+  argv or stdin prompt delivery explicitly. Missing executables fail closed;
+  profile timeout/output limits bound execution. Results remain advisory, not
+  authentication or authorization grants; callers retain provenance fields.
 
 Manual verification:
 

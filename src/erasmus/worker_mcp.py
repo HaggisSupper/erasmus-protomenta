@@ -1,11 +1,27 @@
 """Sandboxed, advisory MCP bridge for external OpenCode/agy workers."""
 from __future__ import annotations
-import json, os, re, subprocess, sys
+import json, os, re, shutil, subprocess, sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 _SECRET = re.compile(r"(?i)(token|api[_-]?key|password|secret)\s*[:=]\s*[^\s,;]+")
 OPERATIONS = {"worker_health", "worker_plan", "worker_review", "worker_test"}
 WORKERS = {"agy", "opencode", "codex"}
+@dataclass(frozen=True)
+class WorkerProfile:
+    id: str
+    executable: str
+    args: tuple[str, ...]
+    prompt_delivery: str = "arg"
+    output_limit: int = 20000
+    def __post_init__(self):
+        if self.prompt_delivery not in {"arg", "stdin"}: raise ValueError("prompt_delivery must be arg or stdin")
+        if self.output_limit < 1: raise ValueError("output_limit must be positive")
+    def command(self, executable: str, root: Path, prompt: str, operation: str) -> tuple[list[str], str | None]:
+        values = {"root": str(root), "prompt": prompt, "operation": operation, "model": self.id}
+        argv = [executable] + [item.format(**values) for item in self.args]
+        if self.prompt_delivery == "arg" and "{prompt}" not in self.args: argv.append(prompt)
+        return argv, None if self.prompt_delivery == "arg" else prompt
 def _redact(value: str) -> str: return _SECRET.sub(lambda m: f"{m.group(1)}=[REDACTED]", value)
 class WorkerMcpServer:
     def __init__(self, allowed_roots: tuple[str | Path, ...], timeout: int = 600):
@@ -19,6 +35,8 @@ class WorkerMcpServer:
     def _run(self, operation: str, root: Path, prompt: str, command: str) -> dict[str, Any]:
         if command not in WORKERS: raise ValueError("worker must be agy, opencode, or codex")
         if not isinstance(prompt, str) or not prompt.strip(): raise ValueError("prompt is required")
+        executable = shutil.which(command)
+        if not executable: raise ValueError("worker executable not found: " + command)
         if command == "codex":
             argv = ["codex", "exec", "--model", "gpt-5.3-codex-spark", "--sandbox", "danger-full-access", "-a", "never", "-C", str(root), prompt]
         elif operation == "worker_health":

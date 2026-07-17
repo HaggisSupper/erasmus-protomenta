@@ -19,6 +19,8 @@ class WorkerProfile:
         if self.output_limit < 1: raise ValueError("output_limit must be positive")
     def command(self, executable: str, root: Path, prompt: str, operation: str) -> tuple[list[str], str | None]:
         values = {"root": str(root), "prompt": prompt, "operation": operation, "model": self.id}
+        unknown = {token[1:-1] for item in self.args for token in re.findall(r"\{[^{}]+\}", item)} - values.keys()
+        if unknown: raise ValueError("unknown worker profile placeholders: " + ", ".join(sorted(unknown)))
         argv = [executable] + [item.format(**values) for item in self.args]
         if self.prompt_delivery == "arg" and "{prompt}" not in self.args: argv.append(prompt)
         return argv, None if self.prompt_delivery == "arg" else prompt
@@ -46,7 +48,7 @@ class WorkerMcpServer:
         try: result = subprocess.run(argv, cwd=root, shell=False, capture_output=True, text=True, timeout=self.timeout, env=os.environ.copy())
         except subprocess.TimeoutExpired as error: raise ValueError(f"worker timed out after {self.timeout}s") from error
         output = _redact((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
-        return {"operation": operation, "worker": command, "status": "ok" if result.returncode == 0 else "failed", "returncode": result.returncode, "advisory": False, "authorization": "local-write", "output": output[:20000]}
+        return {"operation": operation, "worker": command, "status": "ok" if result.returncode == 0 else "failed", "returncode": result.returncode, "advisory": False, "authorization": "local-write", "output": output[:20000], "provenance": {"worker": command, "executable": executable, "project_root": str(root), "operation": operation}}
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in OPERATIONS: raise ValueError(f"unknown tool: {name}")
         return self._run(name, self._root(arguments.get("project_root")), arguments.get("prompt", "health check"), arguments.get("worker", "agy"))

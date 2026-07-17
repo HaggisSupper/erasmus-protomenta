@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, TextIO
 _SECRET = re.compile(r"(?i)(token|api[_-]?key|password|secret)\s*[:=]\s*[^\s,;]+")
 OPERATIONS = {"worker_health", "worker_plan", "worker_review", "worker_test"}
+WORKERS = {"agy", "opencode", "codex"}
 def _redact(value: str) -> str: return _SECRET.sub(lambda m: f"{m.group(1)}=[REDACTED]", value)
 class WorkerMcpServer:
     def __init__(self, allowed_roots: tuple[str | Path, ...], timeout: int = 600):
@@ -16,9 +17,14 @@ class WorkerMcpServer:
         if not root.is_dir(): raise ValueError("project_root does not exist")
         return root
     def _run(self, operation: str, root: Path, prompt: str, command: str) -> dict[str, Any]:
-        if command not in {"agy", "opencode"}: raise ValueError("worker must be agy or opencode")
+        if command not in WORKERS: raise ValueError("worker must be agy, opencode, or codex")
         if not isinstance(prompt, str) or not prompt.strip(): raise ValueError("prompt is required")
-        argv = [command, "--help"] if operation == "worker_health" else ([command, "--print", "--mode", "plan", "--sandbox", "--project", str(root), prompt] if command == "agy" else [command, "run", "--pure", prompt])
+        if command == "codex":
+            argv = ["codex", "exec", "--model", "gpt-5.3-codex-spark", "--sandbox", "read-only", "-C", str(root), prompt]
+        elif operation == "worker_health":
+            argv = [command, "--help"]
+        else:
+            argv = ([command, "--print", "--mode", "plan", "--sandbox", "--project", str(root), prompt] if command == "agy" else [command, "run", "--pure", prompt])
         try: result = subprocess.run(argv, cwd=root, shell=False, capture_output=True, text=True, timeout=self.timeout, env=os.environ.copy())
         except subprocess.TimeoutExpired as error: raise ValueError(f"worker timed out after {self.timeout}s") from error
         output = _redact((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
@@ -32,7 +38,7 @@ class WorkerMcpServer:
             method = request.get("method")
             if method == "initialize": return {"jsonrpc":"2.0","id":request_id,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"erasmus-worker","version":"0.1.0"}}}
             if method == "notifications/initialized": return None
-            if method == "tools/list": return {"jsonrpc":"2.0","id":request_id,"result":{"tools":[{"name":n,"description":"Sandboxed advisory worker operation.","inputSchema":{"type":"object","required":["project_root"],"properties":{"project_root":{"type":"string"},"prompt":{"type":"string"},"worker":{"enum":["agy","opencode"]}}}} for n in sorted(OPERATIONS)]}}
+            if method == "tools/list": return {"jsonrpc":"2.0","id":request_id,"result":{"tools":[{"name":n,"description":"Sandboxed advisory worker operation.","inputSchema":{"type":"object","required":["project_root"],"properties":{"project_root":{"type":"string"},"prompt":{"type":"string"},"worker":{"enum":sorted(WORKERS)}}}} for n in sorted(OPERATIONS)]}}
             if method == "tools/call":
                 params=request.get("params",{}); value=self.call(params.get("name"),params.get("arguments",{})); return {"jsonrpc":"2.0","id":request_id,"result":{"content":[{"type":"text","text":json.dumps(value)}]}}
             raise ValueError("unsupported MCP method")

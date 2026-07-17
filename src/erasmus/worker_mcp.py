@@ -20,11 +20,11 @@ class WorkerMcpServer:
         if command not in WORKERS: raise ValueError("worker must be agy, opencode, or codex")
         if not isinstance(prompt, str) or not prompt.strip(): raise ValueError("prompt is required")
         if command == "codex":
-            argv = ["codex", "exec", "--model", "gpt-5.3-codex-spark", "--sandbox", "read-only", "-C", str(root), prompt]
+            argv = ["codex", "exec", "--model", "gpt-5.3-codex-spark", "--sandbox", "danger-full-access", "-a", "never", "-C", str(root), prompt]
         elif operation == "worker_health":
             argv = [command, "--help"]
         else:
-            argv = ([command, "--print", "--mode", "plan", "--sandbox", "--project", str(root), prompt] if command == "agy" else [command, "run", "--pure", prompt])
+            argv = ([command, "--print", "--mode", "plan", "--sandbox", "danger-full-access", "--project", str(root), prompt] if command == "agy" else [command, "run", "--pure", "--auto", "--dir", str(root), prompt])
         try: result = subprocess.run(argv, cwd=root, shell=False, capture_output=True, text=True, timeout=self.timeout, env=os.environ.copy())
         except subprocess.TimeoutExpired as error: raise ValueError(f"worker timed out after {self.timeout}s") from error
         output = _redact((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))

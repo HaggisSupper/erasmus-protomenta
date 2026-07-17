@@ -21,7 +21,7 @@ def test_typed_profile_rejects_invalid_limits_and_delivery():
     with pytest.raises(ValueError): WorkerProfile("fixture", "fixture", ("--help",), prompt_delivery="shell")
 
 def test_missing_profile_executable_fails_closed(tmp_path):
-    server = WorkerMcpServer((tmp_path,))
+    server = WorkerMcpServer((tmp_path,), require_executable=True)
     with patch("erasmus.worker_mcp.shutil.which", return_value=None):
         response = server.handle({"id": 1, "method": "tools/call", "params": {"name": "worker_plan", "arguments": {"project_root": str(tmp_path), "worker": "agy", "prompt": "x"}}})
     assert "worker executable not found" in response["error"]["message"]

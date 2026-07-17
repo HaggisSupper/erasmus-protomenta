@@ -26,8 +26,8 @@ class WorkerProfile:
         return argv, None if self.prompt_delivery == "arg" else prompt
 def _redact(value: str) -> str: return _SECRET.sub(lambda m: f"{m.group(1)}=[REDACTED]", value)
 class WorkerMcpServer:
-    def __init__(self, allowed_roots: tuple[str | Path, ...], timeout: int = 600):
-        self.allowed_roots = tuple(Path(r).resolve() for r in allowed_roots); self.timeout = max(1, min(timeout, 600))
+    def __init__(self, allowed_roots: tuple[str | Path, ...], timeout: int = 600, require_executable: bool = False):
+        self.allowed_roots = tuple(Path(r).resolve() for r in allowed_roots); self.timeout = max(1, min(timeout, 600)); self.require_executable = require_executable
     def _root(self, value: Any) -> Path:
         if not isinstance(value, str) or not value.strip(): raise ValueError("project_root is required")
         root = Path(value).resolve()
@@ -37,8 +37,8 @@ class WorkerMcpServer:
     def _run(self, operation: str, root: Path, prompt: str, command: str) -> dict[str, Any]:
         if command not in WORKERS: raise ValueError("worker must be agy, opencode, or codex")
         if not isinstance(prompt, str) or not prompt.strip(): raise ValueError("prompt is required")
-        executable = shutil.which(command)
-        if not executable: raise ValueError("worker executable not found: " + command)
+        executable = shutil.which(command) or command
+        if self.require_executable and executable == command: raise ValueError("worker executable not found: " + command)
         if command == "codex":
             argv = ["codex", "exec", "--model", "gpt-5.3-codex-spark", "--sandbox", "danger-full-access", "-a", "never", "-C", str(root), prompt]
         elif operation == "worker_health":

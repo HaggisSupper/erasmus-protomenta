@@ -276,6 +276,21 @@ def test_run_headless_records_unexpected_exit(monkeypatch):
     assert "prompt" not in error.value.evidence.redacted_argv
 
 
+def test_run_headless_uses_utf8_for_cli_output(monkeypatch):
+    captured = {}
+
+    def run(*args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args[0], 0, "OK", "")
+
+    monkeypatch.setattr("erasmus.headless.subprocess.run", run)
+    from erasmus.headless import run_headless
+
+    assert run_headless(HeadlessSpec("ollama", "model"), "prompt", timeout_seconds=1).content == "OK"
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
+
+
 def test_run_headless_records_spawn_failure_without_prompt_evidence(monkeypatch):
     def run(*args, **kwargs):
         raise OSError("argument list too long")

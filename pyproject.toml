@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 erasmus = "erasmus.cli.main:main"
+erasmus-mcp = "erasmus.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/erasmus"]

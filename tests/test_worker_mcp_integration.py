@@ -32,7 +32,7 @@ def test_worker_crash_is_failed_and_advisory(tmp_path):
     with patch("erasmus.worker_mcp.subprocess.run", return_value=subprocess.CompletedProcess([], 7, "", "boom")):
         response = server.handle(_request(project_root=str(tmp_path), worker="agy"))
     value = json.loads(response["result"]["content"][0]["text"])
-    assert value["status"] == "failed" and value["advisory"] and "boom" in value["output"]
+    assert value["status"] == "failed" and not value["advisory"] and value["authorization"] == "local-write" and "boom" in value["output"]
 
 
 def test_worker_output_is_bounded(tmp_path):

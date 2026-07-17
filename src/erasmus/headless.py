@@ -144,6 +144,8 @@ def run_headless(spec: HeadlessSpec, prompt: str, timeout_seconds: float) -> Hea
             command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout_seconds,
             check=False,
         )
@@ -156,15 +158,15 @@ def run_headless(spec: HeadlessSpec, prompt: str, timeout_seconds: float) -> Hea
         evidence = HeadlessProcessEvidence(
             _redact_prompt_argv(command, prompt),
             completed.returncode,
-            completed.stdout,
-            completed.stderr,
+            completed.stdout or "",
+            completed.stderr or "",
         )
         detail = (evidence.stderr_tail or evidence.stdout_tail).strip()
         raise HeadlessExecutionError(f"{spec.backend}/{spec.model} failed: {detail}", evidence)
-    content = completed.stdout.strip()
+    content = (completed.stdout or "").strip()
     if not content:
         raise RuntimeError(f"{spec.backend}/{spec.model} returned empty output")
-    return HeadlessResult(spec, content, time.monotonic() - started, completed.stderr.strip())
+    return HeadlessResult(spec, content, time.monotonic() - started, (completed.stderr or "").strip())
 
 
 class HeadlessRouter:

@@ -36,6 +36,8 @@ class ErasmusMcpServer:
         self.allowed_roots = allowed_roots
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
+        if not isinstance(request, dict):
+            return self._error(None, "request must be an object")
         request_id = request.get("id")
         method = request.get("method")
         try:
@@ -84,7 +86,12 @@ class ErasmusMcpServer:
         for line in input_stream:
             if not line.strip():
                 continue
-            response = self.handle(json.loads(line))
+            try:
+                request = json.loads(line)
+            except json.JSONDecodeError as error:
+                response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": f"parse error: {error.msg}"}}
+            else:
+                response = self.handle(request)
             if response is not None:
                 output_stream.write(json.dumps(response) + "\n")
                 output_stream.flush()

@@ -42,6 +42,38 @@ Preferred live presentation: PLAN → EVIDENCE → ACTION → RESULT → COUNTER
 
 Provide a simple status surface showing what the system knows, plans, changes, verifies, blocks, and can reverse. A future WinTMUX-style command center may expose separate agent panes for plans, evidence, tool actions, results, disagreements, and blockers; Phase 1 requires only the data contracts and minimal status surface, not the elaborate UI.
 
+## Local-first deployment track | Operator-ready Erasmus
+
+The repository is where Erasmus is developed, tested, reviewed, versioned, and packaged. The deployed product runs locally on the operator's Windows machine and must not require GitHub connectivity for normal use.
+
+The operator entry point is:
+
+```powershell
+opencode-erasmus
+```
+
+That command must invoke the OpenCode Erasmus persona and silently make the complete local substrate ready: persistent SQLite state, retrieval/indexing, typed local tools, mission and checkpoint state, immune and skill services, model-runtime control, logs, and health evidence.
+
+Required delivery sequence:
+
+1. Define one versioned strongly typed configuration contract and installed directory layout.
+2. Implement SQLite persistence and migrations for memory, epistemic state, missions, checkpoints, immune incidents, skills, approvals, and runtime evidence.
+3. Implement one robust local service supervisor with dependency ordering, health checks, stale-state recovery, bounded retries, process-tree shutdown, and rollback of partial startup.
+4. Harden `mistral.rs` and fallback runtime control against the real binary contracts.
+5. Expose persistent Erasmus services to OpenCode through typed local tools; the persona prompt is not memory.
+6. Provide `erasmus start|status|doctor|stop|logs|upgrade|rollback` commands.
+7. Provide an idempotent PowerShell installer and a thin `opencode-erasmus` launcher.
+8. Produce a versioned Windows release package with integrity manifest, repair, upgrade, uninstall, and last-known-good rollback.
+9. Prove the complete workflow on Windows using cold start, warm reuse, occupied ports, stale locks, runtime crashes, migration failure, interrupted shutdown, offline operation, upgrade failure, and rollback tests.
+
+Canonical specification: [`docs/specs/local-first-opencode-erasmus.md`](specs/local-first-opencode-erasmus.md)
+
+Implementation plan: [`docs/superpowers/plans/2026-07-16-local-first-opencode-erasmus.md`](superpowers/plans/2026-07-16-local-first-opencode-erasmus.md)
+
+The completion gate is appliance-style behavior: a clean Windows installation can run `opencode-erasmus`, restore persistent state, use typed local tools and model services, survive defined failures, and shut down without orphan processes or supporting console windows.
+
+This track is a packaging and operationalization boundary for the existing Erasmus architecture. It does not replace Phase 1 governance and does not authorize Phase 2 or Phase 3 scope by implication.
+
 ## Phase 2 | Operational expansion
 
 Add only after Phase 1 is proven by real missions:

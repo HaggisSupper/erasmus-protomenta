@@ -6,13 +6,51 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from queue import Queue
+from dataclasses import dataclass
+from enum import Enum
 from threading import Thread
-from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 
 BACKENDS = frozenset({"lmstudio", "mistralrs", "ollama", "llama_cpp"})
+TAIL_LIMIT = 2048
+
+
+class HeadlessConfigurationError(ValueError):
+    """Invalid local runtime configuration."""
+
+
+class HeadlessExecutionError(RuntimeError):
+    """Typed local runtime execution failure."""
+
+    def __init__(self, message: str, evidence: "HeadlessProcessEvidence | None" = None):
+        super().__init__(message)
+        self.evidence = evidence
+
+
+class LifecycleState(Enum):
+    STOPPED = "stopped"
+    STARTING = "starting"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class HeadlessProcessEvidence:
+    argv: tuple[str, ...]
+    exit_code: int | None
+    stdout_tail: str = ""
+    stderr_tail: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "argv", tuple(_redact_arg(arg) for arg in self.argv))
+        object.__setattr__(self, "stdout_tail", _tail(self.stdout_tail))
+        object.__setattr__(self, "stderr_tail", _tail(self.stderr_tail))
+
+    @property
+    def redacted_argv(self) -> tuple[str, ...]:
+        return self.argv
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +59,7 @@ class HeadlessSpec:
     model: str
     executable: str | None = None
     priority: int = 0
+    host: str = "127.0.0.1"
     port: int = 1234
     lora: tuple[str, ...] = ()
     xlora: str | None = None
@@ -31,17 +70,21 @@ class HeadlessSpec:
 
     def __post_init__(self) -> None:
         if self.backend not in BACKENDS:
-            raise ValueError(f"unsupported headless backend: {self.backend}")
+            raise HeadlessConfigurationError(f"unsupported headless backend: {self.backend}")
         if not isinstance(self.model, str) or not self.model.strip():
-            raise ValueError("headless model must be non-empty")
+            raise HeadlessConfigurationError("headless model must be non-empty")
         if not isinstance(self.priority, int) or isinstance(self.priority, bool):
-            raise ValueError("priority must be an integer")
+            raise HeadlessConfigurationError("priority must be an integer")
+        if not isinstance(self.host, str) or not self.host.strip():
+            raise HeadlessConfigurationError("host must be non-empty")
         if not isinstance(self.port, int) or isinstance(self.port, bool) or not 1 <= self.port <= 65535:
-            raise ValueError("port must be between 1 and 65535")
+            raise HeadlessConfigurationError("port must be between 1 and 65535")
         if any(not isinstance(adapter, str) or not adapter.strip() for adapter in self.lora):
-            raise ValueError("LoRA adapter paths must be non-empty strings")
+            raise HeadlessConfigurationError("LoRA adapter paths must be non-empty strings")
         if self.xlora is not None and not self.xlora.strip():
-            raise ValueError("XLora adapter path must be non-empty")
+            raise HeadlessConfigurationError("XLora adapter path must be non-empty")
+        if self.lora and self.xlora:
+            raise HeadlessConfigurationError("LoRA and X-LoRA cannot be combined without real CLI evidence")
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +98,7 @@ class HeadlessResult:
 def build_command(spec: HeadlessSpec, prompt: str) -> tuple[str, ...]:
     """Build an argv tuple; prompt content is never shell-interpolated."""
     if not isinstance(prompt, str):
-        raise ValueError("prompt must be text")
+        raise HeadlessConfigurationError("prompt must be text")
     executable = spec.executable or {"lmstudio": "lms", "mistralrs": "mistralrs", "ollama": "ollama", "llama_cpp": "llama-cli"}[spec.backend]
     if spec.backend == "lmstudio":
         return (executable, "chat", spec.model, "--prompt", prompt,
@@ -63,8 +106,27 @@ def build_command(spec: HeadlessSpec, prompt: str) -> tuple[str, ...]:
     if spec.backend == "ollama":
         return (executable, "run", spec.model, prompt, "--nowordwrap")
     if spec.backend == "llama_cpp":
-        return (executable, "--model", spec.model, "--prompt", prompt, "--no-display-prompt", "--simple-io")
-    command = [executable, "run", "auto", "--model-id", spec.model]
+        return (
+            executable, "--model", spec.model, "--prompt", prompt,
+            "--no-display-prompt", "--simple-io", "--single-turn", "--no-conversation",
+        )
+    command = [executable, "run", "-i", prompt, "auto", "--model-id", spec.model]
+    if spec.model_format:
+        command.extend(("--format", spec.model_format))
+    if spec.quantized_file:
+        command.extend(("--quantized-file", spec.quantized_file))
+    _append_adapters(command, spec)
+    return tuple(command)
+
+
+def build_server_command(spec: HeadlessSpec) -> tuple[str, ...]:
+    if spec.backend != "mistralrs":
+        raise HeadlessConfigurationError("server lifecycle currently supports mistral.rs only")
+    command = [
+        spec.executable or "mistralrs", "serve",
+        "--host", spec.host, "--port", str(spec.port), "--no-ui",
+        "auto", "--model-id", spec.model,
+    ]
     if spec.model_format:
         command.extend(("--format", spec.model_format))
     if spec.quantized_file:
@@ -80,7 +142,6 @@ def run_headless(spec: HeadlessSpec, prompt: str, timeout_seconds: float) -> Hea
     try:
         completed = subprocess.run(
             command,
-            input=prompt if spec.backend == "mistralrs" else None,
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
@@ -88,9 +149,18 @@ def run_headless(spec: HeadlessSpec, prompt: str, timeout_seconds: float) -> Hea
         )
     except subprocess.TimeoutExpired as error:
         raise TimeoutError(f"{spec.backend}/{spec.model} timed out") from error
+    except OSError as error:
+        evidence = HeadlessProcessEvidence(_redact_prompt_argv(command, prompt), None)
+        raise HeadlessExecutionError(f"{spec.backend}/{spec.model} failed to start: {error}", evidence) from error
     if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout).strip()
-        raise RuntimeError(f"{spec.backend}/{spec.model} failed: {detail}")
+        evidence = HeadlessProcessEvidence(
+            _redact_prompt_argv(command, prompt),
+            completed.returncode,
+            completed.stdout,
+            completed.stderr,
+        )
+        detail = (evidence.stderr_tail or evidence.stdout_tail).strip()
+        raise HeadlessExecutionError(f"{spec.backend}/{spec.model} failed: {detail}", evidence)
     content = completed.stdout.strip()
     if not content:
         raise RuntimeError(f"{spec.backend}/{spec.model} returned empty output")
@@ -98,35 +168,26 @@ def run_headless(spec: HeadlessSpec, prompt: str, timeout_seconds: float) -> Hea
 
 
 class HeadlessRouter:
-    """Run candidates concurrently and choose fastest successful output."""
+    """Run candidates by deterministic priority order until one succeeds."""
 
     def __init__(self, runner: Callable[[HeadlessSpec, str, float], HeadlessResult] = run_headless):
         self.runner = runner
 
     def route(self, specs: Sequence[HeadlessSpec], prompt: str, timeout_seconds: float) -> HeadlessResult:
         if not specs:
-            raise ValueError("at least one headless runtime is required")
-        results: list[HeadlessResult] = []
+            raise HeadlessConfigurationError("at least one headless runtime is required")
         failures: list[str] = []
-        outcomes: Queue[tuple[HeadlessSpec, HeadlessResult | Exception]] = Queue()
-        def run(spec: HeadlessSpec) -> None:
-            try:
-                outcomes.put((spec, self.runner(spec, prompt, timeout_seconds)))
-            except Exception as error:  # one backend cannot poison the router
-                outcomes.put((spec, error))
-        for spec in specs:
-            Thread(target=run, args=(spec,), daemon=True, name=f"erasmus-headless-{spec.backend}").start()
-        for _ in specs:
-            spec, outcome = outcomes.get()
-            if isinstance(outcome, HeadlessResult):
-                results.append(outcome)
+        ordered = sorted(specs, key=lambda spec: (spec.priority, spec.backend, spec.model))
+        deadline = time.monotonic() + timeout_seconds
+        for spec in ordered:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 break
-            failures.append(f"{spec.backend}/{spec.model}: {outcome}")
-        if not results:
-            raise RuntimeError("all headless runtimes failed: " + "; ".join(sorted(failures)))
-        return min(results, key=lambda result: (
-            result.latency_seconds, result.spec.priority, result.spec.backend, result.spec.model
-        ))
+            try:
+                return self.runner(spec, prompt, remaining)
+            except Exception as error:  # one backend cannot poison the router
+                failures.append(f"{spec.backend}/{spec.model}: {error}")
+        raise HeadlessExecutionError("all headless runtimes failed: " + "; ".join(failures))
 
 
 class MistralRsLifecycle:
@@ -141,13 +202,17 @@ class MistralRsLifecycle:
         capture_stderr: bool = False,
     ):
         if spec.backend != "mistralrs":
-            raise ValueError("mistral.rs lifecycle requires a mistralrs spec")
+            raise HeadlessConfigurationError("mistral.rs lifecycle requires a mistralrs spec")
         self.spec = spec
         self._popen = popen
         self._healthcheck = healthcheck or _healthcheck
         self.capture_stderr = capture_stderr
         self._process: subprocess.Popen | None = None
         self.healthy = False
+        self.state = LifecycleState.STOPPED
+        self.evidence: HeadlessProcessEvidence | None = None
+        self._stderr_tail = ""
+        self._stderr_thread: Thread | None = None
 
     @property
     def running(self) -> bool:
@@ -155,37 +220,45 @@ class MistralRsLifecycle:
 
     def start(self, timeout_seconds: float = 600.0) -> None:
         if self.running:
-            raise RuntimeError("mistral.rs lifecycle is already running")
-        command = [self.spec.executable or "mistralrs", "serve", "auto",
-                   "--model-id", self.spec.model, "--port", str(self.spec.port), "--no-ui"]
-        if self.spec.model_format:
-            command.extend(("--format", self.spec.model_format))
-        if self.spec.quantized_file:
-            command.extend(("--quantized-file", self.spec.quantized_file))
-        _append_adapters(command, self.spec)
-        self._process = self._popen(command, stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.PIPE if self.capture_stderr else subprocess.DEVNULL,
-                                    text=True)
+            raise HeadlessExecutionError("mistral.rs lifecycle is already running")
+        self.state = LifecycleState.STARTING
+        command = build_server_command(self.spec)
+        self.evidence = HeadlessProcessEvidence(command, None)
+        try:
+            self._process = self._popen(command, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.PIPE if self.capture_stderr else subprocess.DEVNULL,
+                                        text=True)
+        except OSError as error:
+            self.state = LifecycleState.ERROR
+            raise HeadlessExecutionError(f"mistral.rs failed to start: {error}", self.evidence) from error
+        self._start_stderr_drain()
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             if self._process.poll() is not None:
-                detail = ""
-                if self._process.stderr is not None:
-                    detail = self._process.stderr.read().strip()
-                raise RuntimeError(f"mistral.rs exited before health check: {detail}")
+                self.state = LifecycleState.ERROR
+                self._join_stderr_drain()
+                self.evidence = HeadlessProcessEvidence(command, self._process.poll(), "", self._stderr_tail)
+                raise HeadlessExecutionError(
+                    f"mistral.rs exited before health check: {self.evidence.stderr_tail}",
+                    self.evidence,
+                )
             if self._healthcheck(self.spec, min(2.0, max(0.1, deadline - time.monotonic()))):
                 self.healthy = True
+                self.state = LifecycleState.RUNNING
                 return
             time.sleep(0.2)
         self.stop(timeout_seconds=5)
+        self.state = LifecycleState.ERROR
         raise TimeoutError("mistral.rs did not become healthy before timeout")
 
     def stop(self, timeout_seconds: float = 30.0) -> None:
         process = self._process
         self.healthy = False
         if process is None or process.poll() is not None:
+            self.state = LifecycleState.STOPPED if self.state is not LifecycleState.ERROR else self.state
             return
+        self.state = LifecycleState.STOPPING
         process.terminate()
         try:
             process.wait(timeout=timeout_seconds)
@@ -194,6 +267,28 @@ class MistralRsLifecycle:
             process.wait(timeout=5)
         finally:
             self._process = None
+            self._join_stderr_drain()
+            self.state = LifecycleState.STOPPED
+
+    def _start_stderr_drain(self) -> None:
+        process = self._process
+        if process is None or getattr(process, "stderr", None) is None:
+            return
+
+        def drain() -> None:
+            while True:
+                chunk = process.stderr.read(1024)
+                if not chunk:
+                    break
+                self._stderr_tail = _tail(self._stderr_tail + chunk)
+
+        self._stderr_thread = Thread(target=drain, daemon=True, name="erasmus-mistralrs-stderr")
+        self._stderr_thread.start()
+
+    def _join_stderr_drain(self) -> None:
+        if self._stderr_thread is not None:
+            self._stderr_thread.join(timeout=1)
+            self._stderr_thread = None
 
 
 def _append_adapters(command: list[str], spec: HeadlessSpec) -> None:
@@ -209,10 +304,24 @@ def _append_adapters(command: list[str], spec: HeadlessSpec) -> None:
 
 def _healthcheck(spec: HeadlessSpec, timeout_seconds: float) -> bool:
     request = urllib.request.Request(
-        f"http://127.0.0.1:{spec.port}/v1/models", method="GET"
+        f"http://{spec.host}:{spec.port}/v1/models", method="GET"
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             return 200 <= response.status < 300
     except (urllib.error.URLError, TimeoutError, OSError):
         return False
+
+
+def _tail(text: str) -> str:
+    return text[-TAIL_LIMIT:]
+
+
+def _redact_prompt_argv(argv: tuple[str, ...], prompt: str) -> tuple[str, ...]:
+    return tuple("<redacted>" if arg == prompt else arg for arg in argv)
+
+
+def _redact_arg(arg: str) -> str:
+    if arg.startswith("literal:"):
+        return "literal:<redacted>"
+    return arg

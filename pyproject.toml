@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 erasmus = "erasmus.cli.main:main"
 erasmus-mcp = "erasmus.mcp_server:main"
+erasmus-worker-mcp = "erasmus.worker_mcp:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/erasmus"]
@@ -25,4 +26,3 @@ packages = ["src/erasmus"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-erasmus-worker-mcp = "erasmus.worker_mcp:main"

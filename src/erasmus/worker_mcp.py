@@ -2,12 +2,46 @@
 from __future__ import annotations
 
 import json, os, re, shutil, signal, subprocess, sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
 _SECRET = re.compile(r"(?i)(token|api[_-]?key|password|secret)\s*[:=]\s*[^\s,;]+")
 OPERATIONS = {"worker_health", "worker_plan", "worker_review", "worker_test"}
-WORKERS = {"agy", "opencode", "codex"}
+@dataclass(frozen=True)
+class WorkerProfile:
+    """Validated command contract for one local worker executable."""
+    name: str
+    executable: str
+    argv: tuple[str, ...]
+    model: str | None = None
+    prompt_delivery: str = "argv"
+    timeout: int = 600
+    output_limit: int = 20_000
+
+    def __post_init__(self) -> None:
+        if not self.name or not self.executable or not self.argv:
+            raise ValueError("worker profile requires name, executable, and argv")
+        if self.prompt_delivery not in {"argv", "stdin"}:
+            raise ValueError("prompt_delivery must be argv or stdin")
+        if self.timeout <= 0 or self.output_limit <= 0:
+            raise ValueError("worker profile limits must be positive")
+
+    def command(self, executable: str, root: Path, prompt: str, operation: str) -> tuple[list[str], str | None]:
+        values = {"root": str(root), "prompt": prompt, "model": self.model or ""}
+        args = [executable, *(part.format(**values) for part in self.argv)]
+        if operation == "worker_health":
+            args = [executable, "--help"]
+        return args, None if self.prompt_delivery == "argv" else prompt
+
+
+WORKER_PROFILES = {
+    "agy": WorkerProfile("agy", "agy", ("--print", "--mode", "accept-edits", "--sandbox", "danger-full-access", "--project", "{root}", "{prompt}")),
+    "opencode": WorkerProfile("opencode", "opencode", ("run", "--pure", "--auto", "--dir", "{root}", "{prompt}")),
+    "codex-spark": WorkerProfile("codex-spark", "codex", ("exec", "--model", "{model}", "--sandbox", "danger-full-access", "-a", "never", "-C", "{root}", "{prompt}"), model="gpt-5.3-codex-spark"),
+}
+WORKER_PROFILES["codex"] = WORKER_PROFILES["codex-spark"]
+WORKERS = set(WORKER_PROFILES)
 
 def _redact(value: str) -> str:
     return _SECRET.sub(lambda m: f"{m.group(1)}=[REDACTED]", value)
@@ -25,25 +59,27 @@ class WorkerMcpServer:
         return root
 
     def _run(self, operation: str, root: Path, prompt: str, command: str) -> dict[str, Any]:
-        if command not in WORKERS: raise ValueError("worker must be agy, opencode, or codex")
+        if command not in WORKERS: raise ValueError("worker must be agy, opencode, or codex-spark")
         if not isinstance(prompt, str) or not prompt.strip(): raise ValueError("prompt is required")
-        executable = shutil.which(command)
-        if not executable: raise ValueError(f"worker executable not found: {command}")
-        if command == "codex": argv = [executable, "exec", "--model", "gpt-5.3-codex-spark", "--sandbox", "danger-full-access", "-a", "never", "-C", str(root), prompt]
-        elif operation == "worker_health": argv = [executable, "--help"]
-        elif command == "agy": argv = [executable, "--print", "--mode", "accept-edits", "--sandbox", "danger-full-access", "--project", str(root), prompt]
-        else: argv = [executable, "run", "--pure", "--auto", "--dir", str(root), prompt]
+        profile = WORKER_PROFILES[command]
+        executable = shutil.which(profile.executable)
+        if not executable: raise ValueError(f"worker executable not found: {profile.executable}")
+        argv, stdin = profile.command(executable, root, prompt, operation)
         kwargs = dict(cwd=root, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=os.environ.copy())
         if os.name == "nt": kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         process = subprocess.Popen(argv, **kwargs)
-        try: stdout, stderr = process.communicate(timeout=self.timeout)
+        try:
+            if stdin is None:
+                stdout, stderr = process.communicate(timeout=min(self.timeout, profile.timeout))
+            else:
+                stdout, stderr = process.communicate(input=stdin, timeout=min(self.timeout, profile.timeout))
         except subprocess.TimeoutExpired as error:
             if os.name == "nt": subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True, check=False)
             else: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             process.kill(); process.wait()
             raise ValueError(f"worker timed out after {self.timeout}s") from error
         output = _redact((stdout or "") + ("\n" + stderr if stderr else ""))
-        return {"operation": operation, "worker": command, "status": "ok" if process.returncode == 0 else "failed", "returncode": process.returncode, "advisory": False, "authorization": "local-write", "output": output[:20000]}
+        return {"operation": operation, "worker": command, "status": "ok" if process.returncode == 0 else "failed", "returncode": process.returncode, "advisory": False, "authorization": "local-write", "output": output[:profile.output_limit]}
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in OPERATIONS: raise ValueError(f"unknown tool: {name}")

@@ -28,4 +28,5 @@ class Navigator:
     def route(self, query: str) -> dict:
         index = self.index(); needle = query.lower(); matches = [s for s in index["symbols"] if needle in s["name"].lower() or needle in s["file"].lower()]
         files = sorted({s["file"] for s in matches})
-        return {"query": query, "candidate_files": files[:50], "symbols": matches[:100], "dependencies": sorted({d for f in files for d in index["imports"].get(f, [])}), "required_tests": [f for f in index["imports"] if Path(f).name.startswith("test_")], "readonly": True}
+        dependencies = sorted({d for f in files for d in index["imports"].get(f, [])})
+        return {"query": query, "candidate_files": files[:50], "symbols": matches[:100], "dependencies": dependencies, "context7_queries": [f"{d} official documentation" for d in dependencies[:20]], "lsp": {"status": "not_connected", "requested": ["definitions", "references", "diagnostics"]}, "required_tests": [f for f in index["imports"] if Path(f).name.startswith("test_")], "readonly": True}

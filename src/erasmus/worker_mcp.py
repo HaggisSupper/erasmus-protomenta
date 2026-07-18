@@ -4,6 +4,8 @@ import json, os, re, shutil, subprocess, sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
+from erasmus.authority import AuthorityDecision, decide
+from erasmus.contract_enforcer import ContractSnapshot, ContractViolation, enforce, load_contract_snapshot
 _SECRET = re.compile(r"(?i)(token|api[_-]?key|password|secret)\s*[:=]\s*[^\s,;]+")
 OPERATIONS = {"worker_health", "worker_plan", "worker_review", "worker_test"}
 WORKERS = {"agy", "opencode", "codex"}
@@ -26,8 +28,10 @@ class WorkerProfile:
         return argv, None if self.prompt_delivery == "arg" else prompt
 def _redact(value: str) -> str: return _SECRET.sub(lambda m: f"{m.group(1)}=[REDACTED]", value)
 class WorkerMcpServer:
-    def __init__(self, allowed_roots: tuple[str | Path, ...], timeout: int = 600, require_executable: bool = False):
+    def __init__(self, allowed_roots: tuple[str | Path, ...], timeout: int = 600, require_executable: bool = False, contract_root: str | Path | None = None, authority_rules: list[dict] | None = None):
         self.allowed_roots = tuple(Path(r).resolve() for r in allowed_roots); self.timeout = max(1, min(timeout, 600)); self.require_executable = require_executable
+        self.contract_snapshot: ContractSnapshot | None = load_contract_snapshot(contract_root) if contract_root else None
+        self.authority_rules = authority_rules or []
     def _root(self, value: Any) -> Path:
         if not isinstance(value, str) or not value.strip(): raise ValueError("project_root is required")
         root = Path(value).resolve()
@@ -51,7 +55,12 @@ class WorkerMcpServer:
         return {"operation": operation, "worker": command, "status": "ok" if result.returncode == 0 else "failed", "returncode": result.returncode, "advisory": False, "authorization": "local-write", "output": output[:20000], "provenance": {"worker": command, "executable": executable, "project_root": str(root), "operation": operation}}
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in OPERATIONS: raise ValueError(f"unknown tool: {name}")
-        return self._run(name, self._root(arguments.get("project_root")), arguments.get("prompt", "health check"), arguments.get("worker", "agy"))
+        root = self._root(arguments.get("project_root")); worker = arguments.get("worker", "agy")
+        if self.contract_snapshot:
+            result = decide(worker, name, str(root), self.authority_rules)
+            if result.decision is not AuthorityDecision.ALLOWED: raise ContractViolation(result.reason)
+            enforce(self.contract_snapshot, project_root=root, capability=name, declared=arguments.get("declared_capabilities", []), granted=arguments.get("granted_capabilities", []))
+        return self._run(name, root, arguments.get("prompt", "health check"), worker)
     def handle(self, request: dict[str, Any]) -> dict[str, Any] | None:
         request_id = request.get("id")
         try:

@@ -54,3 +54,10 @@ def test_codex_spark_command():
         run.return_value = subprocess.CompletedProcess([], 0, "ok", "")
         server.call("worker_review", {"project_root": str(tmp_path), "worker": "codex", "prompt": "review"})
     assert run.call_args.args[0][:4] == ["codex", "exec", "--model", "gpt-5.3-codex-spark"]
+
+def test_governed_worker_requires_contract_and_capability(tmp_path: Path):
+    (tmp_path / "constitution").mkdir(); (tmp_path / "governance").mkdir()
+    for path in (tmp_path / "constitution" / "immutable-contract.md", tmp_path / "governance" / "agent-control-policy.yaml"): path.write_text("x")
+    server = WorkerMcpServer((tmp_path,), contract_root=tmp_path, authority_rules=[{"actor": "agy", "operation": "worker_plan", "scope": str(tmp_path), "effect": "allow"}])
+    response = server.handle({"id": 1, "method": "tools/call", "params": {"name": "worker_plan", "arguments": {"project_root": str(tmp_path), "declared_capabilities": [], "granted_capabilities": []}}})
+    assert "capability not authorized" in response["error"]["message"]

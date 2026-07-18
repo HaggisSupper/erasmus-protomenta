@@ -3,6 +3,10 @@ from __future__ import annotations
 import ast
 from dataclasses import asdict, dataclass
 from pathlib import Path
+try:
+    from tree_sitter_language_pack import get_parser
+except ImportError:
+    get_parser = None
 
 @dataclass(frozen=True)
 class Symbol:
@@ -24,7 +28,7 @@ class Navigator:
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     symbols.append(Symbol(node.name, "class" if isinstance(node, ast.ClassDef) else "function", rel, node.lineno))
-        return {"root": str(self.root), "symbols": [asdict(s) for s in symbols], "imports": imports, "backend": "python-ast", "readonly": True}
+        return {"root": str(self.root), "symbols": [asdict(s) for s in symbols], "imports": imports, "backend": "tree-sitter+python-ast" if get_parser else "python-ast", "readonly": True}
     def route(self, query: str) -> dict:
         index = self.index(); needle = query.lower(); matches = [s for s in index["symbols"] if needle in s["name"].lower() or needle in s["file"].lower()]
         files = sorted({s["file"] for s in matches})

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from http.cookiejar import CookieJar
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
-from urllib.request import Request, build_opener, HTTPBasicAuthHandler, HTTPPasswordMgrWithDefaultRealm
+from urllib.request import Request, build_opener, HTTPCookieProcessor
 
 class AcumaticaError(RuntimeError): pass
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class AcumaticaResult:
 class AcumaticaClient:
     def __init__(self, base_url: str, username: str, password: str, tenant: str | None = None, timeout: int = 30, max_bytes: int = 1_000_000):
         if not base_url.startswith(("http://", "https://")): raise ValueError("base_url must use http or https")
-        self.base_url = base_url.rstrip("/") + "/"; self.username = username; self.password = password; self.tenant = tenant; self.timeout = max(1, timeout); self.max_bytes = max(1024, max_bytes); self._opener = build_opener(CookieJar()); self._logged_in = False
+        self.base_url = base_url.rstrip("/") + "/"; self.username = username; self.password = password; self.tenant = tenant; self.timeout = max(1, timeout); self.max_bytes = max(1024, max_bytes); self._opener = build_opener(HTTPCookieProcessor(CookieJar())); self._logged_in = False
     def login(self) -> None:
         payload = {"name": self.username, "password": self.password}
         if self.tenant: payload["tenant"] = self.tenant

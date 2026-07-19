@@ -1,7 +1,7 @@
-# Copy into ~/.codex/config.toml or .codex/config.toml after setting CONTEXT7_API_KEY.
-[mcp_servers.context7]
-command = "npx"
-args = ["-y", "@upstash/context7-mcp"]
-startup_timeout_sec = 40
-[mcp_servers.context7.env]
-CONTEXT7_API_KEY = "${CONTEXT7_API_KEY}"
+# Context7 is intentionally disabled until explicitly enabled by the operator.
+# [mcp_servers.context7]
+# command = "npx"
+# args = ["-y", "@upstash/context7-mcp"]
+# startup_timeout_sec = 40
+# [mcp_servers.context7.env]
+# CONTEXT7_API_KEY = "${CONTEXT7_API_KEY}"

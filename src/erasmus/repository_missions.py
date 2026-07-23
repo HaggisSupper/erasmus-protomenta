@@ -18,6 +18,9 @@ except ImportError:  # The disposable verifier remains standard-library runnable
     Draft202012Validator = None  # type: ignore[assignment,misc]
 
 from .store import Store
+from .authority import AuthorityDecision, decide
+from .capability_graph import CapabilityGraph
+from .review import tenth_man_prompt
 
 
 class RepositoryMissionError(ValueError):
@@ -291,8 +294,13 @@ class PatchGate:
         }))
         post_outside = sorted(set(changed_paths) - allowed)
         if post_outside:
-            run(("reset", "--hard", expected_head))
-            run(("clean", "-fd"))
+            tracked = tuple(
+                path for path in allowed
+                if run(("ls-files", "--error-unmatch", "--", path)).returncode == 0
+            )
+            if tracked:
+                run(("restore", "--source", expected_head, "--staged", "--worktree", "--", *tracked))
+            run(("clean", "-fd", "--", *tuple(sorted(allowed))))
             raise RepositoryMissionError(
                 f"applied patch changed a path outside allowed paths: {post_outside[0]}"
             )
@@ -534,9 +542,22 @@ class RepositoryMissionService:
         "draft_pr_recorded": "awaiting_human",
     }
 
-    def __init__(self, store: Store, runner: LocalGitRunner | None = None) -> None:
+    def __init__(
+        self,
+        store: Store,
+        runner: LocalGitRunner | None = None,
+        authority_rules: list[dict] | None = None,
+    ) -> None:
         self.store = store
         self.runner = runner or LocalGitRunner()
+        self.authority_rules = [dict(rule) for rule in (authority_rules or [])]
+        self.capabilities = CapabilityGraph(store.db)
+        try:
+            self.capabilities.export_manifest()
+        except LookupError:
+            self.capabilities.import_bundle(
+                Path(__file__).resolve().parents[2] / "capabilities" / "okf" / "pr-governance"
+            )
 
     def create(
         self,
@@ -548,6 +569,7 @@ class RepositoryMissionService:
             raise RepositoryMissionError("actor is required")
         if authority != "repository:execute":
             raise RepositoryMissionError("repository:execute authority is required")
+        self._require_authority(actor, "repository_execute", contract.repository_root)
         contract_json = json.dumps(contract.to_dict(), sort_keys=True, separators=(",", ":"))
         with self.store.db:
             cursor = self.store.db.execute(
@@ -617,6 +639,21 @@ class RepositoryMissionService:
         if str(contract.repository_root) != row["repository_root"]:
             self._transition_terminal(mission_id, "blocked", "repository root identity changed", contract.expected_base_sha)
             raise RepositoryMissionError("repository root identity changed")
+        try:
+            repository_decision = self._require_authority(
+                str(row["actor"]), "repository_execute", contract.repository_root
+            )
+            process_decision = self._require_authority(
+                str(row["actor"]), "process_execute", contract.repository_root
+            )
+            review_decision = self._require_authority(
+                contract.reviewer, "independent_review", contract.repository_root
+            )
+        except RepositoryMissionError as exc:
+            self._transition_terminal(
+                mission_id, "blocked", str(exc), str(row["current_head"] or contract.expected_base_sha)
+            )
+            raise
 
         while True:
             state = str(self._mission_row(mission_id)["status"])
@@ -628,7 +665,15 @@ class RepositoryMissionService:
                 authority_id = self._store_evidence(
                     mission_id,
                     "authority",
-                    {"actor": row["actor"], "authority": row["authority"], "decision": "allowed"},
+                    {
+                        "actor": row["actor"],
+                        "authority": row["authority"],
+                        "repository_decision": repository_decision.reason,
+                        "process_decision": process_decision.reason,
+                        "reviewer": contract.reviewer,
+                        "review_decision": review_decision.reason,
+                        "decision": "allowed",
+                    },
                 )
                 self._transition(
                     mission_id,
@@ -679,9 +724,18 @@ class RepositoryMissionService:
                     )
                 except RepositoryMissionError as exc:
                     target = "blocked" if "provider is required" in str(exc) else "quarantined"
-                    self._transition_terminal(mission_id, target, str(exc), contract.expected_base_sha)
+                    try:
+                        self._restore_mission_paths(contract)
+                    except RepositoryMissionError as cleanup_error:
+                        self._transition_terminal(
+                            mission_id, "blocked", str(cleanup_error), contract.expected_base_sha
+                        )
+                        raise cleanup_error from exc
+                    self._transition_terminal(
+                        mission_id, target, str(exc), contract.expected_base_sha
+                    )
                     raise
-                patch_id = self._store_patch_evidence(mission_id, patch)
+                patch_id = self._store_patch_evidence(mission_id, patch, contract)
                 self._transition(
                     mission_id,
                     "patch_validated",
@@ -692,7 +746,15 @@ class RepositoryMissionService:
                 continue
             if state == "patch_validated":
                 patch_data = self._evidence_data(mission_id, "patch")
-                self._validate_changed_paths(contract, patch_data["changed_paths"])
+                try:
+                    self._validate_changed_paths(contract, patch_data["changed_paths"])
+                    self._validate_patch_snapshot(contract, patch_data)
+                except RepositoryMissionError as exc:
+                    self._restore_mission_paths(contract)
+                    self._transition_terminal(
+                        mission_id, "blocked", str(exc), contract.expected_base_sha
+                    )
+                    raise
                 self._transition(
                     mission_id,
                     "changed",
@@ -702,8 +764,58 @@ class RepositoryMissionService:
                 continue
             if state == "changed":
                 patch_data = self._evidence_data(mission_id, "patch")
-                self._validate_changed_paths(contract, patch_data["changed_paths"])
-                completed, output = self._run_test_command(contract)
+                try:
+                    self._validate_changed_paths(contract, patch_data["changed_paths"])
+                    self._validate_patch_snapshot(contract, patch_data)
+                except RepositoryMissionError as exc:
+                    self._restore_mission_paths(contract)
+                    self._transition_terminal(
+                        mission_id, "blocked", str(exc), contract.expected_base_sha
+                    )
+                    raise
+                test_step = self._capability_step(
+                    "verify_tests", {"process:execute"}, contract.expected_base_sha
+                )
+                try:
+                    completed, output, repository_snapshot = self._run_test_command(contract)
+                except RepositoryMissionError as exc:
+                    failure_id = self._store_evidence(
+                        mission_id,
+                        "test",
+                        {
+                            "command": list(contract.test_command),
+                            "exit_status": -1,
+                            "failure": str(exc),
+                            "head_sha": contract.expected_base_sha,
+                            "diff_digest": patch_data["repository_snapshot"]["diff_digest"],
+                        },
+                    )
+                    rollback_id = self._rollback_owned_changes(
+                        mission_id, contract, failure_id
+                    )
+                    self._transition(
+                        mission_id,
+                        "rolled_back",
+                        str(exc),
+                        contract.expected_base_sha,
+                        (failure_id, rollback_id),
+                    )
+                    raise
+                expected_tree = self._prepare_commit_tree(contract)
+                capability_evidence_id = self._record_capability_evidence(
+                    test_step,
+                    {
+                        "head_sha": contract.expected_base_sha,
+                        "command": list(contract.test_command),
+                        "diff_digest": repository_snapshot["diff_digest"],
+                    },
+                    {
+                        "exit_status": completed.returncode,
+                        "output_digest": hashlib.sha256(output.encode("utf-8")).hexdigest(),
+                    },
+                    "success" if completed.returncode == 0 else "failure",
+                    contract.expected_base_sha,
+                )
                 test_id = self._store_evidence(
                     mission_id,
                     "test",
@@ -712,6 +824,11 @@ class RepositoryMissionService:
                         "exit_status": completed.returncode,
                         "output_digest": hashlib.sha256(output.encode("utf-8")).hexdigest(),
                         "output_excerpt": output[:8192],
+                        "repository_snapshot": repository_snapshot,
+                        "diff_digest": repository_snapshot["diff_digest"],
+                        "expected_commit_tree": expected_tree,
+                        "capability": "run_tests@1.0.0",
+                        "capability_evidence_id": capability_evidence_id,
                     },
                 )
                 if completed.returncode != 0:
@@ -739,6 +856,9 @@ class RepositoryMissionService:
                     head = self._commit_and_push(mission_id, contract)
                 except RepositoryMissionError as exc:
                     current_head = self._git_output(contract.repository_root, ("rev-parse", "HEAD"), "inspect local commit").strip()
+                    if "commit tree" in str(exc) or "merge commit" in str(exc):
+                        self._restore_mission_paths(contract)
+                        current_head = contract.expected_base_sha
                     self._transition_terminal(mission_id, "blocked", str(exc), current_head)
                     raise
                 if contract.reviewer.casefold() == contract.implementer.casefold():
@@ -750,6 +870,30 @@ class RepositoryMissionService:
                 if not contract.countercase.strip():
                     self._transition_terminal(mission_id, "blocked", "countercase is required", head)
                     raise RepositoryMissionError("countercase is required")
+                patch_data = self._evidence_data(mission_id, "patch")
+                diff_digest = str(patch_data["repository_snapshot"]["diff_digest"])
+                exact_review_scope = f"{head}:{diff_digest}"
+                self._require_authority(
+                    contract.reviewer, "independent_review", exact_review_scope
+                )
+                review_step = self._capability_step(
+                    "obtain_countercase", {"review:request"}, head
+                )
+                prompt = tenth_man_prompt(
+                    f"Repository mission {contract.identifier} at HEAD {head} with diff {diff_digest}"
+                )
+                capability_review_id = self._record_capability_evidence(
+                    review_step,
+                    {
+                        "reviewer_identity": contract.reviewer,
+                        "head_sha": head,
+                        "diff_digest": diff_digest,
+                        "prompt_digest": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                    },
+                    {"countercase": contract.countercase, "decision": "await_human"},
+                    "success",
+                    head,
+                )
                 review_id = self._store_evidence(
                     mission_id,
                     "review",
@@ -758,6 +902,10 @@ class RepositoryMissionService:
                         "authority": contract.reviewer_authority,
                         "countercase": contract.countercase,
                         "decision": "await_human",
+                        "head_sha": head,
+                        "diff_digest": diff_digest,
+                        "capability": "invoke_tenth_man_review@1.0.0",
+                        "capability_evidence_id": capability_review_id,
                     },
                 )
                 self._transition(
@@ -846,8 +994,18 @@ class RepositoryMissionService:
             "transitions": transitions,
             "evidence": evidence,
             "draft_pr": draft,
-            "rollback_command": f"git reset --hard {row['expected_base_sha']}",
-            "rollback_args": ["reset", "--hard", row["expected_base_sha"]],
+            "rollback_command": (
+                f"Restore only declared mission paths from {row['expected_base_sha']} "
+                "after confirming the mission branch"
+            ),
+            "rollback_args": [
+                [
+                    "restore", "--source", row["expected_base_sha"],
+                    "--staged", "--worktree", "--",
+                    *json.loads(row["allowed_paths_json"]),
+                ],
+                ["clean", "-fd", "--", *json.loads(row["allowed_paths_json"])],
+            ],
         }
 
     def _mission_row(self, mission_id: int) -> Any:
@@ -857,6 +1015,64 @@ class RepositoryMissionService:
         if row is None:
             raise RepositoryMissionError(f"repository mission {mission_id} not found")
         return row
+
+    def _require_authority(self, actor: str, operation: str, scope: Path | str) -> Any:
+        result = decide(actor, operation, str(scope), self.authority_rules)
+        if result.decision is not AuthorityDecision.ALLOWED:
+            raise RepositoryMissionError(
+                f"authority policy denied {operation} for {actor}: {result.reason}"
+            )
+        return result
+
+    def _capability_step(
+        self, goal: str, authorities: set[str], head_sha: str
+    ) -> Any:
+        plans = self.capabilities.plan(goal, authorities, head_sha)
+        if len(plans) != 1 or not plans[0].steps:
+            raise RepositoryMissionError(
+                f"capability policy denied {goal} at HEAD {head_sha}"
+            )
+        return plans[0].steps[-1]
+
+    def _record_capability_evidence(
+        self,
+        step: Any,
+        inputs: Mapping[str, object],
+        outputs: Mapping[str, object],
+        result: str,
+        head_sha: str,
+    ) -> int:
+        existing = self.store.db.execute(
+            """
+            SELECT id FROM capability_evidence
+            WHERE capability_id = ? AND capability_version = ?
+              AND implementation_id = ? AND implementation_version = ?
+              AND inputs_json = ? AND outputs_json = ? AND head_sha = ? AND result = ?
+            ORDER BY id LIMIT 1
+            """,
+            (
+                step.capability_id,
+                step.capability_version,
+                step.implementation_id,
+                step.implementation_version,
+                json.dumps(inputs, sort_keys=True, separators=(",", ":")),
+                json.dumps(outputs, sort_keys=True, separators=(",", ":")),
+                head_sha,
+                result,
+            ),
+        ).fetchone()
+        if existing is not None:
+            return int(existing["id"])
+        return self.capabilities.record_evidence(
+            step.capability_id,
+            step.capability_version,
+            step.implementation_id,
+            step.implementation_version,
+            inputs,
+            outputs,
+            result,
+            head_sha,
+        )
 
     def _transition(
         self,
@@ -881,17 +1097,26 @@ class RepositoryMissionService:
     ) -> None:
         row = self._mission_row(mission_id)
         from_state = str(row["status"])
+        if from_state == to_state:
+            existing = self.store.db.execute(
+                "SELECT 1 FROM repository_mission_transitions WHERE mission_id = ? AND to_state = ?",
+                (mission_id, to_state),
+            ).fetchone()
+            if existing is not None:
+                return
         expected = self._NEXT_STATES.get(from_state)
         if to_state not in {expected, "blocked", "quarantined", "failed", "rolled_back"}:
             raise RepositoryMissionError(f"illegal transition {from_state} -> {to_state}")
-        self.store.db.execute(
+        updated = self.store.db.execute(
             """
             UPDATE repository_missions
             SET status = ?, current_head = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND status = ?
             """,
             (to_state, repository_head, mission_id, from_state),
-        )
+        ).rowcount
+        if updated != 1:
+            raise RepositoryMissionError("concurrent repository mission transition rejected")
         self.store.db.execute(
             """
             INSERT INTO repository_mission_transitions(
@@ -926,13 +1151,28 @@ class RepositoryMissionService:
             raise RepositoryMissionError("repository mission evidence exceeds bound")
         digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
         with self.store.db:
+            existing = self.store.db.execute(
+                """
+                SELECT id FROM repository_mission_evidence
+                WHERE mission_id = ? AND kind = ? AND digest = ? AND data_json = ?
+                ORDER BY id LIMIT 1
+                """,
+                (mission_id, kind, digest, serialized),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["id"])
             cursor = self.store.db.execute(
                 "INSERT INTO repository_mission_evidence(mission_id, kind, digest, data_json) VALUES (?, ?, ?, ?)",
                 (mission_id, kind, digest, serialized),
             )
         return int(cursor.lastrowid)
 
-    def _store_patch_evidence(self, mission_id: int, patch: PatchEvidence) -> int:
+    def _store_patch_evidence(
+        self,
+        mission_id: int,
+        patch: PatchEvidence,
+        contract: RepositoryMissionContract,
+    ) -> int:
         commands = []
         for command in patch.commands:
             raw = asdict(command)
@@ -950,6 +1190,7 @@ class RepositoryMissionService:
                 "patch_digest": patch.patch_digest,
                 "changed_paths": list(patch.changed_paths),
                 "expected_head": patch.expected_head,
+                "repository_snapshot": self._repository_snapshot(contract.repository_root),
                 "commands": commands,
             },
         )
@@ -971,6 +1212,9 @@ class RepositoryMissionService:
         return completed.stdout
 
     def _inspect_base(self, mission_id: int, contract: RepositoryMissionContract) -> int:
+        step = self._capability_step(
+            "inspect_repository", {"repository:read"}, contract.expected_base_sha
+        )
         top = self._git_output(
             contract.repository_root, ("rev-parse", "--show-toplevel"), "resolve repository root"
         ).strip()
@@ -988,10 +1232,25 @@ class RepositoryMissionService:
         )
         if status:
             raise RepositoryMissionError("repository must have a clean worktree")
+        capability_evidence_id = self._record_capability_evidence(
+            step,
+            {"repository": str(contract.repository_root), "head_sha": head},
+            {"clean": True, "branch": self._git_output(
+                contract.repository_root, ("branch", "--show-current"), "inspect branch"
+            ).strip()},
+            "success",
+            head,
+        )
         return self._store_evidence(
             mission_id,
             "inspection",
-            {"repository_root": str(contract.repository_root), "head": head, "clean": True},
+            {
+                "repository_root": str(contract.repository_root),
+                "head": head,
+                "clean": True,
+                "capability": "inspect_git_repository@1.0.0",
+                "capability_evidence_id": capability_evidence_id,
+            },
         )
 
     def _ensure_mission_branch(self, contract: RepositoryMissionContract) -> None:
@@ -1047,6 +1306,114 @@ class RepositoryMissionService:
             return response
         raise RepositoryMissionError(f"worker patch provider failed: {last_error}")
 
+    def _repository_snapshot(self, repository: Path) -> dict[str, object]:
+        branch = self._git_output(
+            repository, ("branch", "--show-current"), "snapshot branch"
+        ).strip()
+        head = self._git_output(repository, ("rev-parse", "HEAD"), "snapshot HEAD").strip()
+        index_tree = self._git_output(
+            repository, ("write-tree",), "snapshot index tree"
+        ).strip()
+        diff = self._git_output(
+            repository,
+            ("diff", "--binary", "--no-ext-diff", "HEAD", "--"),
+            "snapshot worktree diff",
+        )
+        untracked = self._git_output(
+            repository, ("ls-files", "--others", "--exclude-standard"), "snapshot untracked paths"
+        ).splitlines()
+        untracked_digests: list[tuple[str, str]] = []
+        for relative in sorted(untracked):
+            path = (repository / relative).resolve(strict=True)
+            if not path.is_relative_to(repository.resolve(strict=True)) or not path.is_file():
+                raise RepositoryMissionError("snapshot contains unsafe untracked path")
+            untracked_digests.append((relative, hashlib.sha256(path.read_bytes()).hexdigest()))
+        refs = self._git_output(
+            repository,
+            ("for-each-ref", "--format=%(refname):%(objectname)", "refs/heads", "refs/tags"),
+            "snapshot refs",
+        ).splitlines()
+        markers: dict[str, str | None] = {}
+        for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
+            completed = self.runner.run(repository, ("rev-parse", "-q", "--verify", marker))
+            markers[marker] = completed.stdout.strip() if completed.returncode == 0 else None
+        digest_payload = {
+            "diff": diff,
+            "untracked": untracked_digests,
+        }
+        return {
+            "branch": branch,
+            "head": head,
+            "index_tree": index_tree,
+            "diff_digest": hashlib.sha256(
+                json.dumps(digest_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+            "refs_digest": hashlib.sha256("\n".join(sorted(refs)).encode("utf-8")).hexdigest(),
+            "operation_markers": markers,
+        }
+
+    def _restore_mission_paths(self, contract: RepositoryMissionContract) -> None:
+        repository = contract.repository_root
+        branch = self._git_output(
+            repository, ("branch", "--show-current"), "inspect rollback branch"
+        ).strip()
+        if branch != contract.branch:
+            raise RepositoryMissionError("rollback refused outside the declared mission branch")
+        current_head = self._git_output(
+            repository, ("rev-parse", "HEAD"), "inspect rollback HEAD"
+        ).strip()
+        if current_head != contract.expected_base_sha:
+            moved = self.runner.run(
+                repository,
+                (
+                    "update-ref",
+                    f"refs/heads/{contract.branch}",
+                    contract.expected_base_sha,
+                    current_head,
+                ),
+            )
+            if moved.returncode != 0:
+                raise RepositoryMissionError("unable to restore the mission branch reference")
+        tracked = tuple(
+            path
+            for path in contract.allowed_paths
+            if self.runner.run(
+                repository, ("ls-files", "--error-unmatch", "--", path)
+            ).returncode == 0
+        )
+        if tracked:
+            restored = self.runner.run(
+                repository,
+                (
+                    "restore", "--source", contract.expected_base_sha,
+                    "--staged", "--worktree", "--", *tracked,
+                ),
+            )
+            if restored.returncode != 0:
+                raise RepositoryMissionError("unable to restore mission-owned tracked paths")
+        cleaned = self.runner.run(
+            repository, ("clean", "-fd", "--", *contract.allowed_paths)
+        )
+        if cleaned.returncode != 0:
+            raise RepositoryMissionError("unable to remove mission-owned untracked paths")
+        final_branch = self._git_output(
+            repository, ("branch", "--show-current"), "verify rollback branch"
+        ).strip()
+        final_head = self._git_output(
+            repository, ("rev-parse", "HEAD"), "verify rollback HEAD"
+        ).strip()
+        final_status = self._git_output(
+            repository,
+            ("status", "--porcelain", "--untracked-files=normal"),
+            "verify rollback cleanup",
+        )
+        if (
+            final_branch != contract.branch
+            or final_head != contract.expected_base_sha
+            or final_status
+        ):
+            raise RepositoryMissionError("mission-owned rollback cleanup verification failed")
+
     def _validate_changed_paths(
         self, contract: RepositoryMissionContract, expected_paths: object
     ) -> None:
@@ -1069,47 +1436,91 @@ class RepositoryMissionService:
         if actual != set(expected_paths) or not actual.issubset(set(contract.allowed_paths)):
             raise RepositoryMissionError("worktree changes do not match durable patch evidence")
 
+    def _validate_patch_snapshot(
+        self, contract: RepositoryMissionContract, patch_data: Mapping[str, object]
+    ) -> None:
+        expected = patch_data.get("repository_snapshot")
+        actual = self._repository_snapshot(contract.repository_root)
+        if expected != actual:
+            raise RepositoryMissionError("repository snapshot differs from durable patch evidence")
+
     def _run_test_command(
         self, contract: RepositoryMissionContract
-    ) -> tuple[subprocess.CompletedProcess[str], str]:
-        try:
-            completed = subprocess.run(
-                list(contract.test_command),
-                cwd=contract.repository_root,
-                shell=False,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=contract.test_timeout,
-                check=False,
+    ) -> tuple[subprocess.CompletedProcess[str], str, dict[str, object]]:
+        canonical_before = self._repository_snapshot(contract.repository_root)
+        with tempfile.TemporaryDirectory(
+            prefix="erasmus-test-sandbox-",
+            dir=contract.workspace_root,
+            ignore_cleanup_errors=True,
+        ) as temporary:
+            sandbox = Path(temporary) / "repository"
+            shutil.copytree(
+                contract.repository_root,
+                sandbox,
+                copy_function=shutil.copyfile,
             )
-        except subprocess.TimeoutExpired as exc:
-            stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-            stderr = exc.stderr if isinstance(exc.stderr, str) else ""
-            completed = subprocess.CompletedProcess(
-                list(contract.test_command), -1, stdout=stdout, stderr=stderr + "\ntest command timed out"
-            )
+            self.runner.run(sandbox, ("remote", "remove", "origin"))
+            sandbox_before = self._repository_snapshot(sandbox)
+            try:
+                completed = subprocess.run(
+                    list(contract.test_command),
+                    cwd=sandbox,
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=contract.test_timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+                stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+                completed = subprocess.CompletedProcess(
+                    list(contract.test_command),
+                    -1,
+                    stdout=stdout,
+                    stderr=stderr + "\ntest command timed out",
+                )
+            sandbox_after = self._repository_snapshot(sandbox)
+            if sandbox_after["head"] != sandbox_before["head"]:
+                parents = self._git_output(
+                    sandbox,
+                    ("rev-list", "--parents", "-n", "1", str(sandbox_after["head"])),
+                    "inspect test-created commit",
+                ).split()
+                if len(parents) > 2:
+                    raise RepositoryMissionError("test command created a merge commit")
+            if sandbox_after != sandbox_before:
+                raise RepositoryMissionError("test command mutated repository state")
+        canonical_after = self._repository_snapshot(contract.repository_root)
+        if canonical_after != canonical_before:
+            raise RepositoryMissionError("test command mutated canonical repository state")
         output = (completed.stdout or "") + (completed.stderr or "")
-        return completed, output
+        return completed, output, canonical_before
+
+    def _prepare_commit_tree(self, contract: RepositoryMissionContract) -> str:
+        added = self.runner.run(
+            contract.repository_root, ("add", "--", *contract.allowed_paths)
+        )
+        if added.returncode != 0:
+            raise RepositoryMissionError(f"unable to stage mission paths: {added.stderr[:500]}")
+        return self._git_output(
+            contract.repository_root, ("write-tree",), "record expected commit tree"
+        ).strip()
 
     def _rollback_owned_changes(
         self, mission_id: int, contract: RepositoryMissionContract, test_id: int
     ) -> int:
-        reset = self.runner.run(
-            contract.repository_root, ("reset", "--hard", contract.expected_base_sha)
-        )
-        clean = self.runner.run(contract.repository_root, ("clean", "-fd"))
-        if reset.returncode != 0 or clean.returncode != 0:
-            raise RepositoryMissionError("test failure rollback did not complete")
+        self._restore_mission_paths(contract)
         return self._store_evidence(
             mission_id,
             "rollback",
             {
                 "rollback_sha": contract.expected_base_sha,
                 "test_evidence_id": test_id,
-                "reset_returncode": reset.returncode,
-                "clean_returncode": clean.returncode,
+                "paths": list(contract.allowed_paths),
+                "cleanup_verified": True,
                 "resulting_head": self._git_output(
                     contract.repository_root, ("rev-parse", "HEAD"), "verify rollback HEAD"
                 ).strip(),
@@ -1123,12 +1534,21 @@ class RepositoryMissionService:
             "inspect pre-commit worktree",
         )
         message = f"Repository mission {contract.identifier}"
-        if status:
-            patch_data = self._evidence_data(mission_id, "patch")
-            changed_paths = tuple(str(path) for path in patch_data["changed_paths"])
-            added = self.runner.run(contract.repository_root, ("add", "--", *changed_paths))
-            if added.returncode != 0:
-                raise RepositoryMissionError(f"unable to stage mission paths: {added.stderr[:500]}")
+        test_data = self._evidence_data(mission_id, "test")
+        expected_tree = str(test_data["expected_commit_tree"])
+        branch = self._git_output(
+            contract.repository_root, ("branch", "--show-current"), "inspect commit branch"
+        ).strip()
+        if branch != contract.branch:
+            raise RepositoryMissionError("existing commit is on the wrong mission branch")
+        initial_head = self._git_output(
+            contract.repository_root, ("rev-parse", "HEAD"), "inspect pre-commit HEAD"
+        ).strip()
+        if initial_head == contract.expected_base_sha:
+            if self._git_output(
+                contract.repository_root, ("write-tree",), "verify staged mission tree"
+            ).strip() != expected_tree:
+                raise RepositoryMissionError("staged commit tree differs from tested tree")
             committed = self.runner.run(contract.repository_root, ("commit", "-m", message))
             if committed.returncode != 0:
                 raise RepositoryMissionError(f"unable to commit mission changes: {committed.stderr[:500]}")
@@ -1137,13 +1557,23 @@ class RepositoryMissionService:
         ).strip()
         if head == contract.expected_base_sha:
             raise RepositoryMissionError("mission commit was not created")
-        parent = self._git_output(
-            contract.repository_root, ("rev-parse", "HEAD^"), "inspect mission commit parent"
+        parents = self._git_output(
+            contract.repository_root,
+            ("rev-list", "--parents", "-n", "1", "HEAD"),
+            "inspect mission commit parents",
+        ).split()
+        if len(parents) != 2:
+            raise RepositoryMissionError("mission commit is a merge commit")
+        parent = parents[1]
+        commit_tree = self._git_output(
+            contract.repository_root, ("rev-parse", "HEAD^{tree}"), "inspect mission commit tree"
         ).strip()
         subject = self._git_output(
             contract.repository_root, ("log", "-1", "--pretty=%s"), "inspect mission commit message"
         ).strip()
-        if parent != contract.expected_base_sha or subject != message:
+        if commit_tree != expected_tree:
+            raise RepositoryMissionError("existing commit tree differs from tested commit tree")
+        if parent != contract.expected_base_sha or subject != message or status and initial_head != contract.expected_base_sha:
             raise RepositoryMissionError("local commit does not match the durable mission")
 
         origin_text = self._git_output(

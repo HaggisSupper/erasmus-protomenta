@@ -362,14 +362,22 @@ provides a merge operation.
 
 ```powershell
 $db = "state\repository-missions.db"
-erasmus --db $db repository-mission-create --contract ".\repository-mission.json"
-erasmus --db $db repository-mission-run 1
+$rules = ".\repository-authority-rules.json"
+erasmus --db $db repository-mission-create --contract ".\repository-mission.json" `
+  --actor Protomentat --authority-rules $rules
+erasmus --db $db repository-mission-run 1 --authority-rules $rules
 erasmus --db $db repository-mission-inspect 1
 ```
 
-Repository rollback is explicit: from the inspected repository root, run the
-reported `rollback_args` with Git (equivalent to `git reset --hard <base-sha>`)
-only after confirming the target mission branch. Database rollback requires a
+The authority-rules document must independently allow `repository_execute` and
+`process_execute` for the persisted actor and `independent_review` for the
+declared reviewer. The CLI never creates those grants. Test commands run in a
+disposable repository copy; canonical branch, HEAD, tree, refs, and diff digests
+must remain unchanged.
+
+Repository rollback is explicit and path-scoped: from the inspected repository
+root, run the reported `rollback_args` only after confirming the target mission
+branch. They restore and clean only the contract's allowlisted paths. Database rollback requires a
 pre-migration backup: revert the implementation commit and restore that backup.
 Delete only disposable verifier directories; never drop append-only mission
 evidence from a live database.

@@ -137,7 +137,9 @@ def test_create_persists_mission_and_append_only_created_transition(
     store.init()
     contract = RepositoryMissionContract.from_dict(contract_data(repository))
 
-    mission_id = RepositoryMissionService(store).create(
+    mission_id = RepositoryMissionService(
+        store, authority_rules=authority_rules(repository)
+    ).create(
         contract, actor="Protomentat", authority="repository:execute"
     )
 
@@ -355,17 +357,48 @@ def mission_contract(
     return RepositoryMissionContract.from_dict(raw)
 
 
-def mission_service(tmp_path: Path) -> RepositoryMissionService:
+def authority_rules(
+    repository: Path, *, process: bool = True, review: bool = True
+) -> list[dict[str, str]]:
+    rules = [{
+        "actor": "Protomentat",
+        "operation": "repository_execute",
+        "scope": str(repository.resolve()),
+        "effect": "allow",
+    }]
+    if process:
+        rules.append({
+            "actor": "Protomentat",
+            "operation": "process_execute",
+            "scope": str(repository.resolve()),
+            "effect": "allow",
+        })
+    if review:
+        rules.append({
+            "actor": "reviewer-beta",
+            "operation": "independent_review",
+            "scope": "*",
+            "effect": "allow",
+        })
+    return rules
+
+
+def mission_service(
+    tmp_path: Path, repository: Path, *, process: bool = True, review: bool = True
+) -> RepositoryMissionService:
     store = Store(str(tmp_path / "state.db"))
     store.init()
-    return RepositoryMissionService(store)
+    return RepositoryMissionService(
+        store,
+        authority_rules=authority_rules(repository, process=process, review=review),
+    )
 
 
 def test_declared_repository_mission_reaches_awaiting_human_and_pushes_branch(
     tmp_path: Path,
 ) -> None:
     repository, origin, head = repository_with_bare_origin(tmp_path)
-    service = mission_service(tmp_path)
+    service = mission_service(tmp_path, repository)
     contract = mission_contract(repository, head)
     mission_id = service.create(contract, "Protomentat", "repository:execute")
 
@@ -387,13 +420,20 @@ def test_declared_repository_mission_reaches_awaiting_human_and_pushes_branch(
     ]
     assert result["draft_pr"]["changed_paths"] == ["fixture.txt"]
     assert result["draft_pr"]["rollback_sha"] == head
+    patch_evidence = next(item for item in result["evidence"] if item["kind"] == "patch")
+    review_evidence = next(item for item in result["evidence"] if item["kind"] == "review")
+    test_evidence = next(item for item in result["evidence"] if item["kind"] == "test")
+    assert review_evidence["data"]["head_sha"] == result["draft_pr"]["head_sha"]
+    assert review_evidence["data"]["diff_digest"] == patch_evidence["data"]["repository_snapshot"]["diff_digest"]
+    assert review_evidence["data"]["capability"] == "invoke_tenth_man_review@1.0.0"
+    assert test_evidence["data"]["capability"] == "run_tests@1.0.0"
 
 
 def test_governed_worker_uses_same_gate_without_repository_authority(
     tmp_path: Path,
 ) -> None:
     repository, origin, head = repository_with_bare_origin(tmp_path)
-    service = mission_service(tmp_path)
+    service = mission_service(tmp_path, repository)
     contract = mission_contract(repository, head, source="worker", branch="mission/worker-change")
     mission_id = service.create(contract, "Protomentat", "repository:execute")
     requests: list[dict[str, object]] = []
@@ -413,7 +453,7 @@ def test_governed_worker_uses_same_gate_without_repository_authority(
 
 def test_failed_tests_restore_recorded_base_and_enter_rolled_back(tmp_path: Path) -> None:
     repository, _, head = repository_with_bare_origin(tmp_path)
-    service = mission_service(tmp_path)
+    service = mission_service(tmp_path, repository)
     contract = mission_contract(
         repository,
         head,
@@ -434,7 +474,7 @@ def test_failed_tests_restore_recorded_base_and_enter_rolled_back(tmp_path: Path
 
 def test_malformed_worker_response_is_quarantined_without_changes(tmp_path: Path) -> None:
     repository, _, head = repository_with_bare_origin(tmp_path)
-    service = mission_service(tmp_path)
+    service = mission_service(tmp_path, repository)
     contract = mission_contract(repository, head, source="worker", branch="mission/malformed")
     mission_id = service.create(contract, "Protomentat", "repository:execute")
 
@@ -447,7 +487,7 @@ def test_malformed_worker_response_is_quarantined_without_changes(tmp_path: Path
 
 def test_run_blocks_when_persisted_execution_authority_is_denied(tmp_path: Path) -> None:
     repository, _, head = repository_with_bare_origin(tmp_path)
-    service = mission_service(tmp_path)
+    service = mission_service(tmp_path, repository)
     mission_id = service.create(
         mission_contract(repository, head), "Protomentat", "repository:execute"
     )
@@ -471,7 +511,7 @@ def test_run_blocks_corrupted_review_boundaries_before_draft_creation(
     tmp_path: Path, field: str, value: str, message: str
 ) -> None:
     repository, _, head = repository_with_bare_origin(tmp_path)
-    service = mission_service(tmp_path)
+    service = mission_service(tmp_path, repository)
     mission_id = service.create(
         mission_contract(repository, head), "Protomentat", "repository:execute"
     )
@@ -499,7 +539,7 @@ def test_push_failure_retains_local_commit_and_blocks_with_rollback_command(
 ) -> None:
     repository, _, head = repository_with_bare_origin(tmp_path)
     git(repository, "remote", "remove", "origin")
-    service = mission_service(tmp_path)
+    service = mission_service(tmp_path, repository)
     mission_id = service.create(
         mission_contract(repository, head), "Protomentat", "repository:execute"
     )
@@ -517,7 +557,7 @@ def test_interrupted_worker_mission_resumes_without_duplicate_commit_or_draft(
     tmp_path: Path,
 ) -> None:
     repository, _, head = repository_with_bare_origin(tmp_path)
-    service = mission_service(tmp_path)
+    service = mission_service(tmp_path, repository)
     contract = mission_contract(repository, head, source="worker", branch="mission/resumed")
     mission_id = service.create(contract, "Protomentat", "repository:execute")
 
@@ -538,7 +578,7 @@ def test_interrupted_worker_mission_resumes_without_duplicate_commit_or_draft(
 
 def test_interrupted_worker_mission_blocks_on_worktree_mismatch(tmp_path: Path) -> None:
     repository, _, head = repository_with_bare_origin(tmp_path)
-    service = mission_service(tmp_path)
+    service = mission_service(tmp_path, repository)
     contract = mission_contract(repository, head, source="worker", branch="mission/mismatch")
     mission_id = service.create(contract, "Protomentat", "repository:execute")
 
@@ -552,6 +592,203 @@ def test_interrupted_worker_mission_blocks_on_worktree_mismatch(tmp_path: Path) 
     assert service.inspect(mission_id)["state"] == "blocked"
 
 
+def test_repository_execution_requires_policy_decision(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    store = Store(str(tmp_path / "denied.db"))
+    store.init()
+
+    with pytest.raises(RepositoryMissionError, match="authority policy denied"):
+        RepositoryMissionService(store, authority_rules=[]).create(
+            mission_contract(repository, head), "Protomentat", "repository:execute"
+        )
+
+
+def test_process_execution_denial_restores_mission_paths(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository, process=False)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+
+    with pytest.raises(RepositoryMissionError, match="process_execute"):
+        service.run(mission_id)
+
+    assert service.inspect(mission_id)["state"] == "blocked"
+    assert (repository / "fixture.txt").read_text(encoding="utf-8") == "before\n"
+    assert git(repository, "status", "--porcelain").stdout == ""
+
+
+def test_independent_review_requires_policy_decision(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository, review=False)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+
+    with pytest.raises(RepositoryMissionError, match="independent_review"):
+        service.run(mission_id)
+
+    assert service.inspect(mission_id)["state"] == "blocked"
+
+
+@pytest.mark.parametrize(
+    "test_command",
+    [
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('fixture.txt').write_text('evil\\n')",
+        ],
+        [str(Path(shutil.which("git") or "git").resolve()), "commit", "-am", "evil test commit"],
+    ],
+)
+def test_test_command_repository_mutation_is_rejected_and_rolled_back(
+    tmp_path: Path, test_command: list[str]
+) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    mission_id = service.create(
+        mission_contract(repository, head, test_command=test_command),
+        "Protomentat",
+        "repository:execute",
+    )
+
+    with pytest.raises(RepositoryMissionError, match="mutated repository state"):
+        service.run(mission_id)
+
+    assert service.inspect(mission_id)["state"] == "rolled_back"
+    assert git(repository, "rev-parse", "HEAD").stdout.strip() == head
+    assert git(repository, "status", "--porcelain").stdout == ""
+
+
+def test_test_command_merge_commit_is_functionally_rejected(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    git(repository, "switch", "-c", "side")
+    (repository / "other.txt").write_text("side\n", encoding="utf-8")
+    git(repository, "commit", "-am", "side change")
+    git(repository, "switch", "main")
+    service = mission_service(tmp_path, repository)
+    test_command = [
+        str(Path(shutil.which("git") or "git").resolve()),
+        "merge",
+        "side",
+        "--no-ff",
+        "-m",
+        "evil merge",
+    ]
+    mission_id = service.create(
+        mission_contract(repository, head, test_command=test_command),
+        "Protomentat",
+        "repository:execute",
+    )
+
+    with pytest.raises(RepositoryMissionError, match="merge commit"):
+        service.run(mission_id)
+
+    assert service.inspect(mission_id)["state"] == "rolled_back"
+    assert git(repository, "rev-list", "--merges", "mission/bounded-change").stdout == ""
+
+
+def test_post_apply_quarantine_restores_mission_owned_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+    original = PatchGate.validate_and_apply
+
+    def fail_after_apply(gate, *args, **kwargs):
+        original(gate, *args, **kwargs)
+        raise RepositoryMissionError("post-apply provenance failure")
+
+    monkeypatch.setattr(PatchGate, "validate_and_apply", fail_after_apply)
+    with pytest.raises(RepositoryMissionError, match="post-apply"):
+        service.run(mission_id)
+
+    assert service.inspect(mission_id)["state"] == "quarantined"
+    assert (repository / "fixture.txt").read_text(encoding="utf-8") == "before\n"
+    assert git(repository, "status", "--porcelain").stdout == ""
+
+
+def test_recovery_rejects_same_path_with_different_diff_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+    with monkeypatch.context() as context:
+        context.setattr(
+            service,
+            "_run_test_command",
+            lambda _: (_ for _ in ()).throw(KeyboardInterrupt("after patch")),
+        )
+        with pytest.raises(KeyboardInterrupt):
+            service.run(mission_id)
+    assert service.inspect(mission_id)["state"] == "changed"
+    (repository / "fixture.txt").write_text("tampered\n", encoding="utf-8")
+
+    with pytest.raises(RepositoryMissionError, match="snapshot"):
+        service.run(mission_id)
+
+    assert service.inspect(mission_id)["state"] == "blocked"
+    assert (repository / "fixture.txt").read_text(encoding="utf-8") == "before\n"
+
+
+def test_recovery_rejects_existing_commit_with_wrong_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+    with monkeypatch.context() as context:
+        context.setattr(
+            service,
+            "_commit_and_push",
+            lambda *_: (_ for _ in ()).throw(KeyboardInterrupt("before commit")),
+        )
+        with pytest.raises(KeyboardInterrupt):
+            service.run(mission_id)
+    assert service.inspect(mission_id)["state"] == "tested"
+    (repository / "fixture.txt").write_text("wrong tree\n", encoding="utf-8")
+    git(repository, "add", "fixture.txt")
+    git(repository, "commit", "-m", "Repository mission bounded-change")
+
+    with pytest.raises(RepositoryMissionError, match="commit tree"):
+        service.run(mission_id)
+
+    assert service.inspect(mission_id)["state"] == "blocked"
+    assert git(repository, "rev-parse", "HEAD").stdout.strip() == head
+
+
+def test_evidence_is_deduplicated_across_recovery_boundaries(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+
+    first = service._store_evidence(mission_id, "test-boundary", {"value": 1})
+    second = service._store_evidence(mission_id, "test-boundary", {"value": 1})
+
+    assert first == second
+    assert service.store.db.execute(
+        "SELECT COUNT(*) FROM repository_mission_evidence WHERE mission_id = ? AND kind = 'test-boundary'",
+        (mission_id,),
+    ).fetchone()[0] == 1
+    service._transition(mission_id, "authorized", "deduplicated boundary", head)
+    service._transition(mission_id, "authorized", "deduplicated boundary", head)
+    assert service.store.db.execute(
+        "SELECT COUNT(*) FROM repository_mission_transitions WHERE mission_id = ? AND to_state = 'authorized'",
+        (mission_id,),
+    ).fetchone()[0] == 1
+
+
 def test_repository_mission_cli_create_run_and_inspect_emit_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -559,6 +796,8 @@ def test_repository_mission_cli_create_run_and_inspect_emit_json(
     contract = mission_contract(repository, head)
     contract_path = tmp_path / "repository-mission.json"
     contract_path.write_text(json.dumps(contract.to_dict()), encoding="utf-8")
+    rules_path = tmp_path / "authority-rules.json"
+    rules_path.write_text(json.dumps({"rules": authority_rules(repository)}), encoding="utf-8")
     database = tmp_path / "cli.db"
 
     monkeypatch.setattr(
@@ -571,6 +810,10 @@ def test_repository_mission_cli_create_run_and_inspect_emit_json(
             "repository-mission-create",
             "--contract",
             str(contract_path),
+            "--actor",
+            "Protomentat",
+            "--authority-rules",
+            str(rules_path),
         ],
     )
     main()
@@ -580,7 +823,10 @@ def test_repository_mission_cli_create_run_and_inspect_emit_json(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["erasmus", "--db", str(database), "repository-mission-run", str(created["mission_id"])],
+        [
+            "erasmus", "--db", str(database), "repository-mission-run",
+            str(created["mission_id"]), "--authority-rules", str(rules_path),
+        ],
     )
     main()
     run = json.loads(capsys.readouterr().out)
@@ -609,3 +855,18 @@ def test_repository_mission_cli_registers_no_merge_command(
     assert "repository-mission-create" in error
     assert "repository-mission-run" in error
     assert "repository-mission-inspect" in error
+
+
+def test_repository_mission_cli_cannot_self_grant_execution_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract_path = tmp_path / "contract.json"
+    contract_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["erasmus", "repository-mission-create", "--contract", str(contract_path)],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        main()

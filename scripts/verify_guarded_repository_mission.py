@@ -102,7 +102,33 @@ def main() -> None:
 
         store = Store(str(root / "state.db"))
         store.init()
-        service = RepositoryMissionService(store)
+        rules = [
+            {
+                "actor": "Protomentat",
+                "operation": "repository_execute",
+                "scope": str(repository),
+                "effect": "allow",
+            },
+            {
+                "actor": "Protomentat",
+                "operation": "process_execute",
+                "scope": str(repository),
+                "effect": "allow",
+            },
+            {
+                "actor": "manual-declared-reviewer",
+                "operation": "independent_review",
+                "scope": "*",
+                "effect": "allow",
+            },
+            {
+                "actor": "manual-worker-reviewer",
+                "operation": "independent_review",
+                "scope": "*",
+                "effect": "allow",
+            },
+        ]
+        service = RepositoryMissionService(store, authority_rules=rules)
 
         declared_id = service.create(
             contract(repository, base_sha, "manual-declared", "mission/manual-declared", "declared"),

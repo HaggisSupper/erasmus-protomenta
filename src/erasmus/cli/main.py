@@ -105,8 +105,11 @@ def main() -> None:
 
     repository_mission_create = sub.add_parser("repository-mission-create")
     repository_mission_create.add_argument("--contract", required=True)
+    repository_mission_create.add_argument("--actor", required=True)
+    repository_mission_create.add_argument("--authority-rules", required=True)
     repository_mission_run = sub.add_parser("repository-mission-run")
     repository_mission_run.add_argument("mission_id", type=int)
+    repository_mission_run.add_argument("--authority-rules", required=True)
     repository_mission_inspect = sub.add_parser("repository-mission-inspect")
     repository_mission_inspect.add_argument("mission_id", type=int)
 
@@ -456,16 +459,21 @@ def main() -> None:
 
     elif args.cmd == "repository-mission-create":
         raw_contract = json.loads(Path(args.contract).read_text(encoding="utf-8"))
-        service = RepositoryMissionService(store)
+        service = RepositoryMissionService(
+            store, authority_rules=_authority_rules(args.authority_rules)
+        )
         mission_id = service.create(
             RepositoryMissionContract.from_dict(raw_contract),
-            actor="Protomentat",
+            actor=args.actor,
             authority="repository:execute",
         )
         print(json.dumps({"mission_id": mission_id, "state": "created"}, indent=2))
 
     elif args.cmd == "repository-mission-run":
-        print(json.dumps(RepositoryMissionService(store).run(args.mission_id), indent=2))
+        service = RepositoryMissionService(
+            store, authority_rules=_authority_rules(args.authority_rules)
+        )
+        print(json.dumps(service.run(args.mission_id), indent=2))
 
     elif args.cmd == "repository-mission-inspect":
         print(json.dumps(RepositoryMissionService(store).inspect(args.mission_id), indent=2))
@@ -777,6 +785,14 @@ def _executable_mission_engine(store: Store, mission_id: int) -> MissionEngine:
 def _local_runtime_config(path: str) -> LocalRuntimeConfig:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     return LocalRuntimeConfig.from_mapping(raw)
+
+
+def _authority_rules(path: str) -> list[dict]:
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    rules = raw.get("rules") if isinstance(raw, dict) else raw
+    if not isinstance(rules, list) or not all(isinstance(rule, dict) for rule in rules):
+        raise SystemExit("authority rules must be a JSON list or an object with a rules list")
+    return [dict(rule) for rule in rules]
 
 
 def _runtime_identity(config: LocalRuntimeConfig) -> dict[str, object]:

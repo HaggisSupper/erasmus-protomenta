@@ -18,8 +18,8 @@ The system combines bounded conversational continuity, deterministic-first capab
 - `erasmus init` — apply schema migrations and initialise the database
 - `erasmus status` — table row counts and applied schema versions
 - `erasmus mission-create --title "..." --objective "..."`
-- `erasmus repository-mission-create --contract PATH` — create a bounded local Git mission
-- `erasmus repository-mission-run <id>` — execute through a local draft record and stop at human review
+- `erasmus repository-mission-create --contract PATH --actor ACTOR --authority-rules RULES` — create a policy-authorized bounded local Git mission
+- `erasmus repository-mission-run <id> --authority-rules RULES` — execute through capability and authority gates, then stop at human review
 - `erasmus repository-mission-inspect <id>` — inspect transitions, evidence, rollback data, and the draft comparison
 - `erasmus sleep` — consolidate events into experience candidates (idempotent)
 - `erasmus sleep-report <run-id>` — inspect classifications, reasons, and stage history

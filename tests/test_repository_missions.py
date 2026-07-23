@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import shutil
 import sqlite3
+import subprocess
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -9,6 +12,8 @@ import pytest
 
 from erasmus.migrations import apply_migrations
 from erasmus.repository_missions import (
+    LocalGitRunner,
+    PatchGate,
     RepositoryMissionContract,
     RepositoryMissionError,
     RepositoryMissionService,
@@ -170,3 +175,125 @@ def test_repository_mission_migration_is_idempotent(tmp_path: Path) -> None:
         row[0]
         for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     }
+
+
+def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    executable = shutil.which("git")
+    assert executable is not None
+    return subprocess.run(
+        [executable, *args],
+        cwd=repo,
+        shell=False,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def git_repository(tmp_path: Path) -> tuple[Path, str]:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    git(repository, "init", "--initial-branch=main")
+    git(repository, "config", "user.name", "Repository Mission Test")
+    git(repository, "config", "user.email", "repository-mission@example.invalid")
+    (repository / "fixture.txt").write_text("before\n", encoding="utf-8")
+    (repository / "other.txt").write_text("untouched\n", encoding="utf-8")
+    git(repository, "add", "fixture.txt", "other.txt")
+    git(repository, "commit", "-m", "fixture base")
+    return repository, git(repository, "rev-parse", "HEAD").stdout.strip()
+
+
+def text_patch(path: str = "fixture.txt") -> str:
+    return (
+        f"diff --git a/{path} b/{path}\n"
+        f"--- a/{path}\n"
+        f"+++ b/{path}\n"
+        "@@ -1 +1 @@\n"
+        "-before\n"
+        "+after\n"
+    )
+
+
+def test_patch_gate_applies_valid_text_patch_and_returns_bounded_evidence(
+    tmp_path: Path,
+) -> None:
+    repository, head = git_repository(tmp_path)
+
+    evidence = PatchGate(LocalGitRunner()).validate_and_apply(
+        repository, text_patch(), ("fixture.txt",), head
+    )
+
+    assert (repository / "fixture.txt").read_text(encoding="utf-8") == "after\n"
+    assert evidence.patch_digest == hashlib.sha256(text_patch().encode("utf-8")).hexdigest()
+    assert evidence.changed_paths == ("fixture.txt",)
+    assert evidence.expected_head == head
+    assert evidence.commands
+    assert all(len(command.stdout_excerpt) <= 4096 for command in evidence.commands)
+    assert all("PATH=" not in command.stdout_excerpt for command in evidence.commands)
+
+
+@pytest.mark.parametrize(
+    ("patch", "message"),
+    [
+        ("", "empty"),
+        ("this is prose, not a patch", "malformed"),
+        ("diff --git a/fixture.txt b/fixture.txt\nGIT binary patch\nliteral 1\nAcmZQz\n", "binary"),
+        (
+            "diff --git /absolute.txt /absolute.txt\n"
+            "--- /absolute.txt\n+++ /absolute.txt\n@@ -1 +1 @@\n-x\n+y\n",
+            "absolute",
+        ),
+        (
+            "diff --git a/../escape.txt b/../escape.txt\n"
+            "--- a/../escape.txt\n+++ b/../escape.txt\n@@ -1 +1 @@\n-x\n+y\n",
+            "traversal",
+        ),
+        (
+            "diff --git a/fixture.txt b/outside.txt\n"
+            "similarity index 100%\nrename from fixture.txt\nrename to outside.txt\n",
+            "outside",
+        ),
+    ],
+)
+def test_patch_gate_rejects_unsafe_or_malformed_patch(
+    tmp_path: Path, patch: str, message: str
+) -> None:
+    repository, head = git_repository(tmp_path)
+
+    with pytest.raises(RepositoryMissionError, match=message):
+        PatchGate(LocalGitRunner()).validate_and_apply(
+            repository, patch, ("fixture.txt",), head
+        )
+
+    assert git(repository, "status", "--porcelain").stdout == ""
+
+
+def test_patch_gate_rejects_dirty_tree(tmp_path: Path) -> None:
+    repository, head = git_repository(tmp_path)
+    (repository / "fixture.txt").write_text("dirty\n", encoding="utf-8")
+
+    with pytest.raises(RepositoryMissionError, match="clean"):
+        PatchGate(LocalGitRunner()).validate_and_apply(
+            repository, text_patch(), ("fixture.txt",), head
+        )
+
+
+def test_patch_gate_rejects_stale_head(tmp_path: Path) -> None:
+    repository, _ = git_repository(tmp_path)
+
+    with pytest.raises(RepositoryMissionError, match="HEAD"):
+        PatchGate(LocalGitRunner()).validate_and_apply(
+            repository, text_patch(), ("fixture.txt",), "f" * 40
+        )
+
+
+def test_patch_gate_rejects_disallowed_path(tmp_path: Path) -> None:
+    repository, head = git_repository(tmp_path)
+
+    with pytest.raises(RepositoryMissionError, match="allowed"):
+        PatchGate(LocalGitRunner()).validate_and_apply(
+            repository, text_patch(), ("other.txt",), head
+        )
+
+    assert git(repository, "status", "--porcelain").stdout == ""

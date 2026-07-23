@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -15,6 +19,288 @@ from .store import Store
 
 class RepositoryMissionError(ValueError):
     """Raised when a repository mission violates a deterministic boundary."""
+
+
+@dataclass(frozen=True)
+class GitCommandEvidence:
+    args: tuple[str, ...]
+    returncode: int
+    stdout_digest: str
+    stderr_digest: str
+    stdout_excerpt: str
+    stderr_excerpt: str
+
+
+@dataclass(frozen=True)
+class PatchEvidence:
+    patch_digest: str
+    changed_paths: tuple[str, ...]
+    expected_head: str
+    commands: tuple[GitCommandEvidence, ...]
+
+
+class LocalGitRunner:
+    """Run a discovered local Git executable without a command shell."""
+
+    def __init__(self) -> None:
+        discovered = shutil.which("git")
+        if discovered is None:
+            raise RepositoryMissionError("Git executable was not found")
+        self.executable = Path(discovered).resolve(strict=True)
+        if not self.executable.is_file() or not self.executable.is_absolute():
+            raise RepositoryMissionError("Git executable must resolve to an absolute file")
+
+    def run(
+        self,
+        repo: Path,
+        args: tuple[str, ...],
+        timeout: int = 30,
+    ) -> subprocess.CompletedProcess[str]:
+        if not isinstance(args, tuple) or not all(isinstance(arg, str) for arg in args):
+            raise RepositoryMissionError("Git arguments must be an exact tuple of strings")
+        root = repo.resolve(strict=True)
+        if not root.is_dir():
+            raise RepositoryMissionError("Git repository root must be a directory")
+        try:
+            return subprocess.run(
+                [str(self.executable), *args],
+                cwd=root,
+                shell=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RepositoryMissionError(f"Git command timed out: {args[0] if args else 'git'}") from exc
+
+
+def _command_evidence(
+    args: tuple[str, ...], completed: subprocess.CompletedProcess[str]
+) -> GitCommandEvidence:
+    stdout = completed.stdout or ""
+    stderr = completed.stderr or ""
+    return GitCommandEvidence(
+        args=args,
+        returncode=completed.returncode,
+        stdout_digest=hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
+        stderr_digest=hashlib.sha256(stderr.encode("utf-8")).hexdigest(),
+        stdout_excerpt=stdout[:4096],
+        stderr_excerpt=stderr[:4096],
+    )
+
+
+def _safe_relative_git_path(raw_path: str, *, label: str) -> str:
+    if raw_path in {"", "/dev/null"}:
+        if raw_path == "/dev/null":
+            return raw_path
+        raise RepositoryMissionError(f"{label} contains an empty path")
+    if "\\" in raw_path:
+        raise RepositoryMissionError(f"{label} contains a non-portable path")
+    if re.match(r"^[A-Za-z]:/", raw_path) or raw_path.startswith("/"):
+        raise RepositoryMissionError(f"{label} contains an absolute path")
+    path = PurePosixPath(raw_path)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise RepositoryMissionError(f"{label} contains path traversal")
+    return path.as_posix()
+
+
+def _prefixed_patch_path(token: str, prefix: str, *, label: str) -> str:
+    if token == "/dev/null":
+        return token
+    if not token.startswith(prefix):
+        if token.startswith("/") or re.match(r"^[A-Za-z]:[/\\]", token):
+            raise RepositoryMissionError(f"{label} contains an absolute path")
+        raise RepositoryMissionError(f"malformed {label} path")
+    return _safe_relative_git_path(token[len(prefix):], label=label)
+
+
+def _parse_patch_paths(patch_text: str) -> tuple[str, ...]:
+    if not patch_text.strip():
+        raise RepositoryMissionError("patch is empty")
+    if len(patch_text.encode("utf-8", errors="strict")) > 1_048_576:
+        raise RepositoryMissionError("patch exceeds the bounded size")
+    if "\x00" in patch_text or "GIT binary patch" in patch_text or "Binary files " in patch_text:
+        raise RepositoryMissionError("binary patches are not supported")
+    if "160000" in patch_text or "Subproject commit " in patch_text:
+        raise RepositoryMissionError("submodule patches are not supported")
+
+    paths: set[str] = set()
+    saw_diff = False
+    section_has_file_headers = False
+    section_has_rename_pair: set[str] = set()
+    in_hunk = False
+
+    def finish_section() -> None:
+        if saw_diff and not section_has_file_headers and section_has_rename_pair != {"from", "to"}:
+            raise RepositoryMissionError("malformed patch section lacks file headers")
+
+    for line in patch_text.splitlines():
+        if line.startswith("diff --git "):
+            finish_section()
+            tokens = line.split(" ")
+            if len(tokens) != 4 or tokens[:2] != ["diff", "--git"]:
+                raise RepositoryMissionError("malformed diff --git header")
+            old_path = _prefixed_patch_path(tokens[2], "a/", label="diff")
+            new_path = _prefixed_patch_path(tokens[3], "b/", label="diff")
+            paths.update((old_path, new_path))
+            saw_diff = True
+            section_has_file_headers = False
+            section_has_rename_pair = set()
+            in_hunk = False
+            continue
+        if not saw_diff:
+            raise RepositoryMissionError("malformed patch: expected diff --git header")
+        if line.startswith("@@ "):
+            in_hunk = True
+            continue
+        if in_hunk:
+            continue
+        if line.startswith("--- "):
+            path = _prefixed_patch_path(line[4:], "a/", label="old file")
+            if path != "/dev/null":
+                paths.add(path)
+            section_has_file_headers = True
+            continue
+        if line.startswith("+++ "):
+            path = _prefixed_patch_path(line[4:], "b/", label="new file")
+            if path != "/dev/null":
+                paths.add(path)
+            section_has_file_headers = True
+            continue
+        metadata = (
+            "index ", "old mode ", "new mode ", "new file mode ",
+            "deleted file mode ", "similarity index ", "dissimilarity index ",
+        )
+        if line.startswith(metadata):
+            continue
+        for prefix, marker in (
+            ("rename from ", "from"),
+            ("rename to ", "to"),
+            ("copy from ", "from"),
+            ("copy to ", "to"),
+        ):
+            if line.startswith(prefix):
+                paths.add(_safe_relative_git_path(line[len(prefix):], label=prefix.strip()))
+                section_has_rename_pair.add(marker)
+                break
+        else:
+            if line:
+                raise RepositoryMissionError(f"unsupported patch metadata: {line[:80]}")
+    finish_section()
+    if not saw_diff or not paths:
+        raise RepositoryMissionError("malformed patch")
+    paths.discard("/dev/null")
+    return tuple(sorted(paths))
+
+
+class PatchGate:
+    """Validate and apply unified text patches through one deterministic gate."""
+
+    def __init__(self, runner: LocalGitRunner) -> None:
+        self.runner = runner
+
+    def validate_and_apply(
+        self,
+        repo: Path,
+        patch_text: str,
+        allowed_paths: tuple[str, ...],
+        expected_head: str,
+    ) -> PatchEvidence:
+        try:
+            patch_text.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as exc:
+            raise RepositoryMissionError("patch is not valid UTF-8 text") from exc
+        parsed_paths = _parse_patch_paths(patch_text)
+        allowed = {
+            _safe_relative_git_path(path, label="allowed paths")
+            for path in allowed_paths
+        }
+        outside = sorted(set(parsed_paths) - allowed)
+        if outside:
+            raise RepositoryMissionError(f"patch path is outside allowed paths: {outside[0]}")
+
+        root = repo.resolve(strict=True)
+        commands: list[GitCommandEvidence] = []
+
+        def run(args: tuple[str, ...], timeout: int = 30) -> subprocess.CompletedProcess[str]:
+            completed = self.runner.run(root, args, timeout)
+            commands.append(_command_evidence(args, completed))
+            return completed
+
+        head_args = ("rev-parse", "HEAD")
+        head = run(head_args)
+        if head.returncode != 0:
+            raise RepositoryMissionError("unable to inspect repository HEAD")
+        actual_head = head.stdout.strip().lower()
+        if actual_head != expected_head.lower():
+            raise RepositoryMissionError(
+                f"repository HEAD does not match expected HEAD {expected_head}"
+            )
+        status_args = ("status", "--porcelain", "--untracked-files=normal")
+        status = run(status_args)
+        if status.returncode != 0:
+            raise RepositoryMissionError("unable to inspect repository cleanliness")
+        if status.stdout:
+            raise RepositoryMissionError("repository must have a clean worktree")
+
+        patch_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="",
+                suffix=".patch",
+                prefix="erasmus-mission-",
+                dir=root.parent,
+                delete=False,
+            ) as patch_file:
+                patch_file.write(patch_text)
+                patch_path = Path(patch_file.name)
+            check_args = ("apply", "--check", "--whitespace=nowarn", str(patch_path))
+            checked = run(check_args)
+            if checked.returncode != 0:
+                raise RepositoryMissionError(
+                    f"malformed or inapplicable patch: {checked.stderr[:500]}"
+                )
+            apply_args = ("apply", "--whitespace=nowarn", str(patch_path))
+            applied = run(apply_args)
+            if applied.returncode != 0:
+                raise RepositoryMissionError(f"patch application failed: {applied.stderr[:500]}")
+        finally:
+            if patch_path is not None:
+                patch_path.unlink(missing_ok=True)
+
+        diff_args = ("diff", "--name-only", "--no-renames", "HEAD")
+        changed = run(diff_args)
+        if changed.returncode != 0:
+            raise RepositoryMissionError("unable to verify changed paths after patch application")
+        untracked_args = ("ls-files", "--others", "--exclude-standard")
+        untracked = run(untracked_args)
+        if untracked.returncode != 0:
+            raise RepositoryMissionError("unable to verify new paths after patch application")
+        changed_paths = tuple(sorted({
+            _safe_relative_git_path(line, label="changed paths")
+            for line in (*changed.stdout.splitlines(), *untracked.stdout.splitlines())
+            if line
+        }))
+        post_outside = sorted(set(changed_paths) - allowed)
+        if post_outside:
+            run(("reset", "--hard", expected_head))
+            run(("clean", "-fd"))
+            raise RepositoryMissionError(
+                f"applied patch changed a path outside allowed paths: {post_outside[0]}"
+            )
+        if set(changed_paths) != set(parsed_paths):
+            raise RepositoryMissionError("applied changes do not match declared patch paths")
+        return PatchEvidence(
+            patch_digest=hashlib.sha256(patch_text.encode("utf-8")).hexdigest(),
+            changed_paths=changed_paths,
+            expected_head=actual_head,
+            commands=tuple(commands),
+        )
 
 
 def _schema() -> Mapping[str, Any]:

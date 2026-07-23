@@ -1,6 +1,6 @@
 # Guarded Local Repository Mission Implementation Report
 
-Status: `DONE_WITH_CONCERNS`
+Status: `DONE`
 
 ## Outcome
 
@@ -18,6 +18,7 @@ worker, Docker configuration, or new dependency was added.
 2. `cdfd4ed` — Add bounded Git patch gate
 3. `280e5c2` — Execute guarded local repository missions
 4. `22c5b68` — Expose guarded repository mission verification
+5. `f14cba1` — Harden guarded repository mission boundaries
 
 ## Files
 
@@ -53,6 +54,16 @@ worker, Docker configuration, or new dependency was added.
   additive migration rollback.
 - Added CLI commands `repository-mission-create`, `repository-mission-run`, and
   `repository-mission-inspect`. There is no merge command.
+- Repository execution, test-process execution, and independent review now
+  require `erasmus.authority.decide` policy grants. Test and review work also
+  passes through the existing capability planner and records capability
+  evidence bound to exact HEAD and diff digest.
+- Tests execute in a disposable repository copy. Canonical and sandbox branch,
+  HEAD, index tree, refs, operation markers, and diff digest are snapshotted;
+  any repository mutation or merge commit fails the mission.
+- Recovery validates exact patch snapshots and tested commit trees. Rollback
+  restores and cleans only contract-allowlisted paths and verifies the result.
+- Identical evidence records and repeated durable transitions are deduplicated.
 
 ## TDD and Verification Evidence
 
@@ -85,6 +96,17 @@ worker, Docker configuration, or new dependency was added.
   After correcting it, that exact upgrade test plus the retryable migration test
   passed: `2 passed in 1.03s`. Coordination explicitly prohibited a third full
   run, so there is no single post-final-edit all-green full-suite invocation.
+- Independent-review remediation red gate: 10 exploit tests initially failed on
+  the missing authority-policy constructor and unsafe prior behavior.
+- Independent-review remediation green gate: the exploit subset passed
+  `10 passed, 35 deselected in 140.57s`.
+- Required final scoped gate:
+  `.venv\Scripts\python.exe -m pytest tests/test_repository_missions.py
+  tests/test_authority.py -q` passed `48 passed in 329.81s`. A new full-suite
+  run was explicitly prohibited for the remediation.
+- Remediation compile and diff gates passed. The bounded state map was refreshed
+  at 1,034 nodes, 2,576 edges, and 42 communities; generated artifacts were
+  removed.
 
 ## Acceptance Mapping
 
@@ -119,10 +141,8 @@ the standalone `py -3.12` disposable verifier.
 - The approved brief named schema version 10, but this branch already contained
   unrelated migrations 10 through 16. Reusing 10 would corrupt migration
   identity, so the implementation uses the next free version, 17.
-- A final single-command green full-suite result was not obtained after the last
-  stale assertion correction because coordination prohibited another full run.
-  The prior run had 341 passing tests, one skip, and only that stale assertion;
-  the corrected test and adjacent retry test pass independently.
+- A post-remediation full-suite run was explicitly prohibited. The required
+  repository-mission and authority scope is green in one invocation (48 tests).
 - The local draft record does not exercise GitHub permissions, branch
   protection, hosted CI timing, or stale remote reviews.
 - The service intentionally supports local filesystem bare remotes only.
@@ -136,13 +156,13 @@ which this slice deliberately excludes.
 
 ## Rollback
 
-1. Revert commits in reverse order: `22c5b68`, `280e5c2`, `cdfd4ed`, then
-   `2465d6a`.
+1. Revert commits in reverse order: `f14cba1`, `22c5b68`, `280e5c2`, `cdfd4ed`,
+   then `2465d6a`.
 2. On an offline database or after restoring the required pre-migration backup,
    call `rollback_repository_mission_migration(db)` to remove only migration-17
    tables, triggers, and its schema-version row. Do not delete live append-only
    evidence without the Protomentat's explicit authority.
 3. Repository state is separate. Inspect `rollback_args`, confirm the exact
-   mission repository and branch, then run Git with `reset --hard <base-sha>` if
-   rollback is authorized. Delete only disposable local verifier repositories.
-
+   mission repository and branch, then run only the reported path-scoped
+   `restore` and `clean` argument vectors. Delete only disposable local verifier
+   repositories.

@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from erasmus.migrations import apply_migrations
+from erasmus.migrations import apply_migrations, rollback_repository_mission_migration
+from erasmus.cli.main import main
 from erasmus.repository_missions import (
     LocalGitRunner,
     PatchGate,
@@ -176,6 +177,24 @@ def test_repository_mission_migration_is_idempotent(tmp_path: Path) -> None:
         row[0]
         for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     }
+
+
+def test_repository_mission_migration_rollback_removes_only_additive_schema(
+    tmp_path: Path,
+) -> None:
+    db = sqlite3.connect(tmp_path / "rollback.db")
+    apply_migrations(db)
+
+    rollback_repository_mission_migration(db)
+
+    names = {
+        row[0]
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    assert "events" in names
+    assert "repository_missions" not in names
+    assert db.execute("SELECT 1 FROM schema_version WHERE version = 17").fetchone() is None
+    assert apply_migrations(db) == [17]
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -515,3 +534,78 @@ def test_interrupted_worker_mission_resumes_without_duplicate_commit_or_draft(
     assert git(repository, "rev-list", "--count", f"{head}..HEAD").stdout.strip() == "1"
     assert len([draft for draft in [result["draft_pr"]] if draft]) == 1
     assert service.run(mission_id, lambda _: pytest.fail("provider called after completion"))["state"] == "awaiting_human"
+
+
+def test_interrupted_worker_mission_blocks_on_worktree_mismatch(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path)
+    contract = mission_contract(repository, head, source="worker", branch="mission/mismatch")
+    mission_id = service.create(contract, "Protomentat", "repository:execute")
+
+    with pytest.raises(KeyboardInterrupt):
+        service.run(mission_id, lambda _: (_ for _ in ()).throw(KeyboardInterrupt()))
+    (repository / "fixture.txt").write_text("unexpected\n", encoding="utf-8")
+
+    with pytest.raises(RepositoryMissionError, match="durable branched state"):
+        service.run(mission_id, lambda _: text_patch())
+
+    assert service.inspect(mission_id)["state"] == "blocked"
+
+
+def test_repository_mission_cli_create_run_and_inspect_emit_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    contract = mission_contract(repository, head)
+    contract_path = tmp_path / "repository-mission.json"
+    contract_path.write_text(json.dumps(contract.to_dict()), encoding="utf-8")
+    database = tmp_path / "cli.db"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "erasmus",
+            "--db",
+            str(database),
+            "repository-mission-create",
+            "--contract",
+            str(contract_path),
+        ],
+    )
+    main()
+    created = json.loads(capsys.readouterr().out)
+    assert created["state"] == "created"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["erasmus", "--db", str(database), "repository-mission-run", str(created["mission_id"])],
+    )
+    main()
+    run = json.loads(capsys.readouterr().out)
+    assert run["state"] == "awaiting_human"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["erasmus", "--db", str(database), "repository-mission-inspect", str(created["mission_id"])],
+    )
+    main()
+    inspected = json.loads(capsys.readouterr().out)
+    assert inspected["draft_pr"]["head_sha"] == run["draft_pr"]["head_sha"]
+
+
+def test_repository_mission_cli_registers_no_merge_command(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["erasmus", "repository-mission-merge", "1"])
+
+    with pytest.raises(SystemExit, match="2"):
+        main()
+
+    error = capsys.readouterr().err
+    assert "invalid choice: 'repository-mission-merge'" in error
+    assert "repository-mission-create" in error
+    assert "repository-mission-run" in error
+    assert "repository-mission-inspect" in error

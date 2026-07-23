@@ -1220,3 +1220,26 @@ def apply_migrations(db: sqlite3.Connection) -> list[int]:
         newly_applied.append(version)
 
     return newly_applied
+
+
+def rollback_repository_mission_migration(db: sqlite3.Connection) -> None:
+    """Remove only the additive guarded-repository-mission schema.
+
+    This is an explicit offline rollback. Repository branches and commits are
+    separate Git state and are intentionally not modified here.
+    """
+    with db:
+        for statement in (
+            "DROP TRIGGER IF EXISTS repository_mission_transitions_no_update",
+            "DROP TRIGGER IF EXISTS repository_mission_transitions_no_delete",
+            "DROP TRIGGER IF EXISTS repository_mission_evidence_no_update",
+            "DROP TRIGGER IF EXISTS repository_mission_evidence_no_delete",
+            "DROP TRIGGER IF EXISTS draft_pull_requests_no_update",
+            "DROP TRIGGER IF EXISTS draft_pull_requests_no_delete",
+            "DROP TABLE IF EXISTS draft_pull_requests",
+            "DROP TABLE IF EXISTS repository_mission_transitions",
+            "DROP TABLE IF EXISTS repository_mission_evidence",
+            "DROP TABLE IF EXISTS repository_missions",
+        ):
+            db.execute(statement)
+        db.execute("DELETE FROM schema_version WHERE version = 17")

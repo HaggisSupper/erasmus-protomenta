@@ -18,6 +18,9 @@ The system combines bounded conversational continuity, deterministic-first capab
 - `erasmus init` — apply schema migrations and initialise the database
 - `erasmus status` — table row counts and applied schema versions
 - `erasmus mission-create --title "..." --objective "..."`
+- `erasmus repository-mission-create --contract PATH` — create a bounded local Git mission
+- `erasmus repository-mission-run <id>` — execute through a local draft record and stop at human review
+- `erasmus repository-mission-inspect <id>` — inspect transitions, evidence, rollback data, and the draft comparison
 - `erasmus sleep` — consolidate events into experience candidates (idempotent)
 - `erasmus sleep-report <run-id>` — inspect classifications, reasons, and stage history
 - `erasmus sleep-decide ...` — record an evidence-backed belief or skill decision
@@ -39,6 +42,9 @@ The system combines bounded conversational continuity, deterministic-first capab
 - `erasmus review --proposition "..."`
 
 See [`docs/runbook-windows.md`](docs/runbook-windows.md) for PowerShell verification commands.
+The guarded repository loop can be verified without credentials or external
+writes using `py -3.12 scripts\verify_guarded_repository_mission.py`; it never
+registers or performs a merge operation.
 
 ## Status
 

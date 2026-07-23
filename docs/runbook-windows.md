@@ -47,7 +47,7 @@ erasmus --db state\erasmus.db status
 #   "skill_transitions": 0,
 #   "skill_evaluations": 0,
 #   "adapter_readiness_exports": 0,
-#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+#   "schema_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
 # }
 ```
 
@@ -343,6 +343,36 @@ python -m pytest tests\test_missions.py -v
 append-only approval requests. `mission-pause`, `mission-resume`,
 `mission-cancel`, and `mission-rollback` apply only declared deterministic state
 transitions; uncertain interrupted side effects fail closed.
+
+## Guarded local repository mission verification
+
+The verifier creates its working repository, SQLite database, and local bare
+`origin` under one disposable temporary directory. It exercises both a
+predeclared patch and an untrusted governed-worker patch through the same gate,
+checks both pushed remote branches, and succeeds only when both durable draft
+records reach `awaiting_human`.
+
+```powershell
+py -3.12 scripts\verify_guarded_repository_mission.py
+```
+
+The CLI exposes create, run, and inspect only. A contract declares an argument
+vector for its tests; neither the service nor CLI accepts a shell command or
+provides a merge operation.
+
+```powershell
+$db = "state\repository-missions.db"
+erasmus --db $db repository-mission-create --contract ".\repository-mission.json"
+erasmus --db $db repository-mission-run 1
+erasmus --db $db repository-mission-inspect 1
+```
+
+Repository rollback is explicit: from the inspected repository root, run the
+reported `rollback_args` with Git (equivalent to `git reset --hard <base-sha>`)
+only after confirming the target mission branch. Database rollback requires a
+pre-migration backup: revert the implementation commit and restore that backup.
+Delete only disposable verifier directories; never drop append-only mission
+evidence from a live database.
 
 ## Epistemic ledger verification
 

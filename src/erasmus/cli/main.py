@@ -25,6 +25,10 @@ from erasmus.immune import ImmuneCascade
 from erasmus.ledger import EpistemicLedger
 from erasmus.missions import MissionEngine, create_mission
 from erasmus.review import tenth_man_prompt
+from erasmus.repository_missions import (
+    RepositoryMissionContract,
+    RepositoryMissionService,
+)
 from erasmus.runtime import LocalRuntimeConfig, OpenAICompatibleRuntime, run_session
 from erasmus.skills import SkillPromotionEngine
 from erasmus.sleep import consolidate, decide_candidate, sleep_report
@@ -98,6 +102,13 @@ def main() -> None:
     ):
         command_parser = sub.add_parser(command)
         command_parser.add_argument("mission_id", type=int)
+
+    repository_mission_create = sub.add_parser("repository-mission-create")
+    repository_mission_create.add_argument("--contract", required=True)
+    repository_mission_run = sub.add_parser("repository-mission-run")
+    repository_mission_run.add_argument("mission_id", type=int)
+    repository_mission_inspect = sub.add_parser("repository-mission-inspect")
+    repository_mission_inspect.add_argument("mission_id", type=int)
 
     review = sub.add_parser("review")
     review.add_argument("--proposition", required=True)
@@ -442,6 +453,22 @@ def main() -> None:
     elif args.cmd == "mission-rollback":
         engine = _executable_mission_engine(store, args.mission_id)
         print(json.dumps(engine.rollback(args.mission_id), indent=2))
+
+    elif args.cmd == "repository-mission-create":
+        raw_contract = json.loads(Path(args.contract).read_text(encoding="utf-8"))
+        service = RepositoryMissionService(store)
+        mission_id = service.create(
+            RepositoryMissionContract.from_dict(raw_contract),
+            actor="Protomentat",
+            authority="repository:execute",
+        )
+        print(json.dumps({"mission_id": mission_id, "state": "created"}, indent=2))
+
+    elif args.cmd == "repository-mission-run":
+        print(json.dumps(RepositoryMissionService(store).run(args.mission_id), indent=2))
+
+    elif args.cmd == "repository-mission-inspect":
+        print(json.dumps(RepositoryMissionService(store).inspect(args.mission_id), indent=2))
 
     elif args.cmd == "review":
         print(tenth_man_prompt(args.proposition))

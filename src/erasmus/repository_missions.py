@@ -12,7 +12,10 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from jsonschema import Draft202012Validator
+try:
+    from jsonschema import Draft202012Validator
+except ImportError:  # The disposable verifier remains standard-library runnable.
+    Draft202012Validator = None  # type: ignore[assignment,misc]
 
 from .store import Store
 
@@ -314,6 +317,72 @@ def _schema() -> Mapping[str, Any]:
     raise RepositoryMissionError("repository mission schema is unavailable")
 
 
+def _validate_contract_shape(raw: Mapping[str, object]) -> None:
+    schema = _schema()
+    if Draft202012Validator is not None:
+        errors = sorted(
+            Draft202012Validator(schema).iter_errors(dict(raw)),
+            key=lambda error: list(error.path),
+        )
+        if errors:
+            error = errors[0]
+            location = ".".join(str(part) for part in error.absolute_path)
+            label = location or "contract"
+            if error.validator == "required":
+                missing = re.search(r"'([^']+)'", error.message)
+                if missing:
+                    label = missing.group(1)
+            raise RepositoryMissionError(f"{label}: {error.message}")
+        return
+
+    required = set(schema["required"])
+    missing = sorted(required - set(raw))
+    if missing:
+        raise RepositoryMissionError(f"{missing[0]}: required property is missing")
+    allowed = set(schema["properties"])
+    extras = sorted(set(raw) - allowed)
+    if extras:
+        raise RepositoryMissionError(f"contract: additional property is not allowed: {extras[0]}")
+    string_fields = required - {
+        "allowed_paths", "test_command", "test_timeout", "retry_limit"
+    }
+    for field in string_fields:
+        if not isinstance(raw[field], str) or not str(raw[field]).strip():
+            raise RepositoryMissionError(f"{field}: non-empty string is required")
+    if not isinstance(raw["allowed_paths"], list) or not raw["allowed_paths"] or not all(
+        isinstance(path, str) and path for path in raw["allowed_paths"]
+    ):
+        raise RepositoryMissionError("allowed_paths: non-empty string array is required")
+    if len(set(raw["allowed_paths"])) != len(raw["allowed_paths"]):
+        raise RepositoryMissionError("allowed_paths: entries must be unique")
+    if not isinstance(raw["test_command"], list) or not raw["test_command"] or not all(
+        isinstance(argument, str) and argument for argument in raw["test_command"]
+    ):
+        raise RepositoryMissionError("test_command: non-empty argument array is required")
+    for field, minimum, maximum in (("test_timeout", 1, 3600), ("retry_limit", 0, 10)):
+        value = raw[field]
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise RepositoryMissionError(f"{field}: integer must be between {minimum} and {maximum}")
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", str(raw["expected_base_sha"])):
+        raise RepositoryMissionError("expected_base_sha: 40 hexadecimal characters are required")
+    if raw["patch_source"] not in {"declared", "worker"}:
+        raise RepositoryMissionError("patch_source: must be declared or worker")
+    if raw["stopping_condition"] != "awaiting_human":
+        raise RepositoryMissionError("stopping_condition: must be awaiting_human")
+    if raw["reviewer_authority"] != "repository:review":
+        raise RepositoryMissionError("reviewer_authority: repository:review is required")
+    if raw["patch_source"] == "declared":
+        if not isinstance(raw.get("declared_patch"), str) or not raw["declared_patch"]:
+            raise RepositoryMissionError("declared_patch: non-empty patch is required")
+        if "worker_request" in raw:
+            raise RepositoryMissionError("worker_request: not allowed for declared patch source")
+    else:
+        if not isinstance(raw.get("worker_request"), Mapping):
+            raise RepositoryMissionError("worker_request: object is required")
+        if "declared_patch" in raw:
+            raise RepositoryMissionError("declared_patch: not allowed for worker patch source")
+
+
 def _freeze_json(value: Any) -> Any:
     if isinstance(value, Mapping):
         return MappingProxyType({str(key): _freeze_json(item) for key, item in value.items()})
@@ -356,16 +425,7 @@ class RepositoryMissionContract:
     def from_dict(cls, raw: Mapping[str, object]) -> "RepositoryMissionContract":
         if not isinstance(raw, Mapping):
             raise RepositoryMissionError("repository mission contract must be an object")
-        errors = sorted(Draft202012Validator(_schema()).iter_errors(dict(raw)), key=lambda e: list(e.path))
-        if errors:
-            error = errors[0]
-            location = ".".join(str(part) for part in error.absolute_path)
-            label = location or "contract"
-            if error.validator == "required":
-                missing = re.search(r"'([^']+)'", error.message)
-                if missing:
-                    label = missing.group(1)
-            raise RepositoryMissionError(f"{label}: {error.message}")
+        _validate_contract_shape(raw)
 
         workspace_root = Path(str(raw["workspace_root"])).resolve(strict=True)
         repository_root = Path(str(raw["repository_root"])).resolve(strict=True)
@@ -602,7 +662,13 @@ class RepositoryMissionService:
                 )
                 continue
             if state == "branched":
-                self._validate_branched_state(contract)
+                try:
+                    self._validate_branched_state(contract)
+                except RepositoryMissionError as exc:
+                    self._transition_terminal(
+                        mission_id, "blocked", str(exc), contract.expected_base_sha
+                    )
+                    raise
                 try:
                     patch_text = self._obtain_patch(contract, worker_patch_provider)
                     patch = PatchGate(self.runner).validate_and_apply(

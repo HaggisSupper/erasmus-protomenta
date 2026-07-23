@@ -5,6 +5,7 @@ import hashlib
 import shutil
 import sqlite3
 import subprocess
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -297,3 +298,220 @@ def test_patch_gate_rejects_disallowed_path(tmp_path: Path) -> None:
         )
 
     assert git(repository, "status", "--porcelain").stdout == ""
+
+
+def repository_with_bare_origin(tmp_path: Path) -> tuple[Path, Path, str]:
+    repository, head = git_repository(tmp_path)
+    origin = tmp_path / "origin.git"
+    git(tmp_path, "init", "--bare", str(origin))
+    git(repository, "remote", "add", "origin", str(origin))
+    git(repository, "push", "origin", "main:main")
+    return repository, origin, head
+
+
+def mission_contract(
+    repository: Path,
+    head: str,
+    *,
+    source: str = "declared",
+    branch: str = "mission/bounded-change",
+    test_command: list[str] | None = None,
+) -> RepositoryMissionContract:
+    changes: dict[str, object] = {
+        "workspace_root": str(repository.parent),
+        "expected_base_sha": head,
+        "branch": branch,
+        "test_command": test_command
+        or [sys.executable, "-c", "from pathlib import Path; assert Path('fixture.txt').read_text() == 'after\\n'"],
+    }
+    if source == "worker":
+        changes.update(
+            patch_source="worker",
+            declared_patch=None,
+            worker_request={"instruction": "Change only fixture.txt from before to after."},
+        )
+    raw = contract_data(repository, **changes)
+    if source == "worker":
+        raw.pop("declared_patch")
+    return RepositoryMissionContract.from_dict(raw)
+
+
+def mission_service(tmp_path: Path) -> RepositoryMissionService:
+    store = Store(str(tmp_path / "state.db"))
+    store.init()
+    return RepositoryMissionService(store)
+
+
+def test_declared_repository_mission_reaches_awaiting_human_and_pushes_branch(
+    tmp_path: Path,
+) -> None:
+    repository, origin, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path)
+    contract = mission_contract(repository, head)
+    mission_id = service.create(contract, "Protomentat", "repository:execute")
+
+    result = service.run(mission_id)
+
+    assert result["state"] == "awaiting_human"
+    assert git(origin, "rev-parse", f"refs/heads/{contract.branch}").stdout.strip() == result["draft_pr"]["head_sha"]
+    assert [transition["to_state"] for transition in result["transitions"]] == [
+        "created",
+        "authorized",
+        "inspecting",
+        "branched",
+        "patch_validated",
+        "changed",
+        "tested",
+        "reviewed",
+        "draft_pr_recorded",
+        "awaiting_human",
+    ]
+    assert result["draft_pr"]["changed_paths"] == ["fixture.txt"]
+    assert result["draft_pr"]["rollback_sha"] == head
+
+
+def test_governed_worker_uses_same_gate_without_repository_authority(
+    tmp_path: Path,
+) -> None:
+    repository, origin, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path)
+    contract = mission_contract(repository, head, source="worker", branch="mission/worker-change")
+    mission_id = service.create(contract, "Protomentat", "repository:execute")
+    requests: list[dict[str, object]] = []
+
+    def provider(request):
+        requests.append(dict(request))
+        return text_patch()
+
+    result = service.run(mission_id, provider)
+
+    assert result["state"] == "awaiting_human"
+    assert requests == [{"instruction": "Change only fixture.txt from before to after."}]
+    assert "repository_root" not in requests[0]
+    assert "authority" not in requests[0]
+    assert git(origin, "rev-parse", "refs/heads/mission/worker-change").returncode == 0
+
+
+def test_failed_tests_restore_recorded_base_and_enter_rolled_back(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path)
+    contract = mission_contract(
+        repository,
+        head,
+        test_command=[sys.executable, "-c", "raise SystemExit(7)"],
+    )
+    mission_id = service.create(contract, "Protomentat", "repository:execute")
+
+    with pytest.raises(RepositoryMissionError, match="tests failed"):
+        service.run(mission_id)
+
+    inspected = service.inspect(mission_id)
+    assert inspected["state"] == "rolled_back"
+    assert (repository / "fixture.txt").read_text(encoding="utf-8") == "before\n"
+    assert git(repository, "rev-parse", "HEAD").stdout.strip() == head
+    assert git(repository, "status", "--porcelain").stdout == ""
+    assert any(evidence["kind"] == "rollback" for evidence in inspected["evidence"])
+
+
+def test_malformed_worker_response_is_quarantined_without_changes(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path)
+    contract = mission_contract(repository, head, source="worker", branch="mission/malformed")
+    mission_id = service.create(contract, "Protomentat", "repository:execute")
+
+    with pytest.raises(RepositoryMissionError, match="malformed"):
+        service.run(mission_id, lambda _: "I changed the file for you.")
+
+    assert service.inspect(mission_id)["state"] == "quarantined"
+    assert (repository / "fixture.txt").read_text(encoding="utf-8") == "before\n"
+
+
+def test_run_blocks_when_persisted_execution_authority_is_denied(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+    with service.store.db:
+        service.store.db.execute(
+            "UPDATE repository_missions SET authority = 'repository:inspect' WHERE id = ?",
+            (mission_id,),
+        )
+
+    with pytest.raises(RepositoryMissionError, match="authority"):
+        service.run(mission_id)
+
+    assert service.inspect(mission_id)["state"] == "blocked"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [("reviewer", "worker-alpha", "reviewer"), ("countercase", "", "countercase")],
+)
+def test_run_blocks_corrupted_review_boundaries_before_draft_creation(
+    tmp_path: Path, field: str, value: str, message: str
+) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+    row = service.store.db.execute(
+        "SELECT contract_json FROM repository_missions WHERE id = ?", (mission_id,)
+    ).fetchone()
+    raw = json.loads(row["contract_json"])
+    raw[field] = value
+    with service.store.db:
+        service.store.db.execute(
+            "UPDATE repository_missions SET contract_json = ? WHERE id = ?",
+            (json.dumps(raw), mission_id),
+        )
+
+    with pytest.raises(RepositoryMissionError, match=message):
+        service.run(mission_id)
+
+    inspected = service.inspect(mission_id)
+    assert inspected["state"] == "blocked"
+    assert inspected["draft_pr"] is None
+
+
+def test_push_failure_retains_local_commit_and_blocks_with_rollback_command(
+    tmp_path: Path,
+) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    git(repository, "remote", "remove", "origin")
+    service = mission_service(tmp_path)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+
+    with pytest.raises(RepositoryMissionError, match="origin"):
+        service.run(mission_id)
+
+    inspected = service.inspect(mission_id)
+    assert inspected["state"] == "blocked"
+    assert git(repository, "rev-parse", "HEAD").stdout.strip() != head
+    assert head in inspected["rollback_command"]
+
+
+def test_interrupted_worker_mission_resumes_without_duplicate_commit_or_draft(
+    tmp_path: Path,
+) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path)
+    contract = mission_contract(repository, head, source="worker", branch="mission/resumed")
+    mission_id = service.create(contract, "Protomentat", "repository:execute")
+
+    def interrupted(_):
+        raise KeyboardInterrupt("simulated interruption")
+
+    with pytest.raises(KeyboardInterrupt, match="simulated"):
+        service.run(mission_id, interrupted)
+    assert service.inspect(mission_id)["state"] == "branched"
+
+    result = service.run(mission_id, lambda _: text_patch())
+
+    assert result["state"] == "awaiting_human"
+    assert git(repository, "rev-list", "--count", f"{head}..HEAD").stdout.strip() == "1"
+    assert len([draft for draft in [result["draft_pr"]] if draft]) == 1
+    assert service.run(mission_id, lambda _: pytest.fail("provider called after completion"))["state"] == "awaiting_human"

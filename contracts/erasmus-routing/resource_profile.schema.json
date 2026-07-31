@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ResourceProfile",
+  "type": "object",
+  "required": [
+    "id",
+    "kind",
+    "architecture",
+    "capabilities",
+    "health"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "model",
+        "tool",
+        "runtime",
+        "retriever",
+        "validator"
+      ]
+    },
+    "architecture": {
+      "type": "string"
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "adaptation_support": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "backends": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "health": {
+      "enum": [
+        "healthy",
+        "degraded",
+        "unavailable"
+      ]
+    },
+    "context_window_tokens": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true,
+  "$comment": "Experimental design seed. Non-authoritative; not registered with the Erasmus runtime.",
+  "x-erasmus-contract": {
+    "status": "experimental",
+    "authority": "none",
+    "runtime_registered": false,
+    "promotion_requires": [
+      "bounded_mission",
+      "versioned_contract_review",
+      "deterministic_and_negative_tests",
+      "migration_and_rollback"
+    ]
+  }
+}

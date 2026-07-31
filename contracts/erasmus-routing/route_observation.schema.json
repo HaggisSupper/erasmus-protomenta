@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RouteObservation",
+  "type": "object",
+  "required": [
+    "task_signature_id",
+    "route_id",
+    "outcome",
+    "reward"
+  ],
+  "properties": {
+    "task_signature_id": {
+      "type": "string"
+    },
+    "route_id": {
+      "type": "string"
+    },
+    "policy_version": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "object"
+    },
+    "performance": {
+      "type": "object"
+    },
+    "reward": {
+      "type": "number"
+    },
+    "credit_assignment": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "$comment": "Experimental design seed. Non-authoritative; not registered with the Erasmus runtime.",
+  "x-erasmus-contract": {
+    "status": "experimental",
+    "authority": "none",
+    "runtime_registered": false,
+    "promotion_requires": [
+      "bounded_mission",
+      "versioned_contract_review",
+      "deterministic_and_negative_tests",
+      "migration_and_rollback"
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TaskSignature",
+  "type": "object",
+  "required": [
+    "id",
+    "primary_class",
+    "capabilities",
+    "confidence"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "primary_class": {
+      "type": "string"
+    },
+    "secondary_classes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "domain": {
+      "type": "string"
+    },
+    "subtype": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "complexity": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "extreme"
+      ]
+    },
+    "risk": {
+      "enum": [
+        "low",
+        "moderate",
+        "high",
+        "critical"
+      ]
+    },
+    "modalities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deterministic_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "entropy": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true,
+  "$comment": "Experimental design seed. Non-authoritative; not registered with the Erasmus runtime.",
+  "x-erasmus-contract": {
+    "status": "experimental",
+    "authority": "none",
+    "runtime_registered": false,
+    "promotion_requires": [
+      "bounded_mission",
+      "versioned_contract_review",
+      "deterministic_and_negative_tests",
+      "migration_and_rollback"
+    ]
+  }
+}

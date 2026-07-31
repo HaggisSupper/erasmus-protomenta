@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ResolutionCase",
+  "type": "object",
+  "required": [
+    "id",
+    "problem_signature",
+    "branches"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "problem_signature": {
+      "type": "object"
+    },
+    "branches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "hypothesis",
+          "result"
+        ],
+        "properties": {
+          "hypothesis": {
+            "type": "string"
+          },
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "result": {
+            "enum": [
+              "confirmed_cause",
+              "contributing_cause",
+              "disproven_here",
+              "inconclusive",
+              "blocked",
+              "invalid_hypothesis",
+              "obsolete",
+              "successful_resolution"
+            ]
+          },
+          "reuse": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "resolution": {
+      "type": "object"
+    },
+    "validation": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$comment": "Experimental design seed. Non-authoritative; not registered with the Erasmus runtime.",
+  "x-erasmus-contract": {
+    "status": "experimental",
+    "authority": "none",
+    "runtime_registered": false,
+    "promotion_requires": [
+      "bounded_mission",
+      "versioned_contract_review",
+      "deterministic_and_negative_tests",
+      "migration_and_rollback"
+    ]
+  }
+}

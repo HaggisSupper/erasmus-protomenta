@@ -97,3 +97,14 @@ Public documentation must not include personal names, private biographical detai
 ## 10th-Man countercase
 
 The primary risk is elegant over-formalization before Erasmus has proven repeated value. The antidote is strict sequencing: prove the guarded PR loop first; preserve extension seams; refuse broader subsystems until an observed failure or concrete mission justifies them.
+
+## Deferred adaptive-routing target
+
+The accepted target architecture for adaptive problem routing and experience-guided resolution is documented in:
+
+- [`docs/architecture/erasmus-routing/ERASMUS_FINAL_SPEC.md`](architecture/erasmus-routing/ERASMUS_FINAL_SPEC.md)
+- [`docs/architecture/erasmus-routing/CONTRACT_CATALOGUE.md`](architecture/erasmus-routing/CONTRACT_CATALOGUE.md)
+- [`docs/roadmap/ERASMUS_ROUTING_EVOLUTION.md`](roadmap/ERASMUS_ROUTING_EVOLUTION.md)
+- [`docs/adr/ADR-ROUTING-001-adaptive-routing-as-deferred-extension.md`](adr/ADR-ROUTING-001-adaptive-routing-as-deferred-extension.md)
+
+This target does not alter the locked Phase 1–3 sequence or authorize implementation. Its namespaced schemas are experimental and non-authoritative. Any promoted increment requires a concrete observed need, a fresh bounded mission, additive or versioned contracts, disabled-by-default or observation-only rollout where applicable, deterministic and negative tests, rollback, 10th-Man review, and preservation of the current deterministic fallback.

@@ -13,6 +13,37 @@ The system combines bounded conversational continuity, deterministic-first capab
 - **10th-Man immunity** detects divergence and prevents shared hallucination.
 - **Mission engine** converts cognition into bounded execution.
 
+## OpenCode Erasmus layer
+
+The repository includes a provider-neutral OpenCode agent, explicit slash commands, and small composable skills. These files are a thin interaction layer over the real Erasmus CLI, MCP server, SQLite stores, and governed runtime.
+
+From the repository root:
+
+```powershell
+python scripts\validate_opencode_layer.py
+opencode --agent erasmus
+```
+
+Inside OpenCode, use:
+
+- `/erasmus` — route a request to the smallest applicable workflow;
+- `/erasmus-setup` — configure a repository without overwriting local instructions;
+- `/erasmus-spec` — write a bounded specification;
+- `/erasmus-implement` — execute an approved plan;
+- `/erasmus-review` — independently review an exact diff;
+- `/erasmus-research` — produce a bounded cited research note;
+- `/erasmus-handoff` — capture objective continuation state;
+- `/erasmus-doctor` — inspect the local interaction and runtime surfaces without mutation.
+
+To install the versioned agent, commands, and skills into the current user's global OpenCode configuration:
+
+```powershell
+pwsh -NoProfile -File install\Install-ErasmusOpenCode.ps1 -Action Install -WhatIf
+pwsh -NoProfile -File install\Install-ErasmusOpenCode.ps1 -Action Install
+```
+
+The installer does not copy project `opencode.json`, choose a provider/model, or write credentials. Use `-Action Repair`, `Rollback`, or `Uninstall` for the corresponding bounded operation.
+
 ## Commands
 
 - `erasmus init` — apply schema migrations and initialise the database

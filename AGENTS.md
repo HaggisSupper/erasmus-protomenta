@@ -30,6 +30,15 @@ Build a personal, persistent cognitive system for the Erasmus–Protomentat dyad
 - Treat prompts as versioned source artifacts, not strings scattered through code.
 - Add migration and rollback behavior when persistent schemas change.
 
+## OpenCode interaction layer
+
+- Treat `.opencode/agents`, `.opencode/commands`, and `.opencode/skills` as thin interaction artifacts. The Erasmus runtime remains authoritative for memory, belief, mission state, authority, evidence, runtime state, and skill promotion.
+- Read `CONTEXT.md` for shared vocabulary. Load detailed skills lazily through OpenCode's native skill tool only when the request fits.
+- Explicit user entry points belong in `.opencode/commands`; reusable model-selected discipline belongs in `.opencode/skills`.
+- Do not encode hidden state, credentials, provider/model selection, canonical belief, or automatic promotion inside prompts or skills.
+- Before changing an OpenCode artifact, run `python scripts/validate_opencode_layer.py` and preserve native OpenCode frontmatter compatibility.
+- Skills may call existing typed CLI or MCP interfaces. They may not invent commands, infer authority, or treat model agreement as evidence.
+
 ## Required validation
 
 Every change must include:

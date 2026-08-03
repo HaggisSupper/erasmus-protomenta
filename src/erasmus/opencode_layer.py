@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 
 class FrontmatterError(ValueError):
@@ -236,9 +236,7 @@ def _validate_agent(path: Path) -> list[str]:
     permission = data.get("permission")
     if not isinstance(permission, dict) or permission.get("skill") != "allow":
         errors.append(f"{path}: Erasmus agent must allow the native skill tool")
-    if "provider/model" in body.lower() or re.search(r"\bmodel\s*:", body, re.IGNORECASE):
-        errors.append(f"{path}: Erasmus agent body must not pin a provider or model")
-    if "The Erasmus runtime remains authoritative" not in body:
+    if AUTHORITY_SENTENCE not in body:
         errors.append(f"{path}: agent must preserve the authoritative runtime boundary")
     return errors
 

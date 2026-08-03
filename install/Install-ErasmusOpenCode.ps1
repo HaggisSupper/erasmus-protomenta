@@ -18,6 +18,58 @@ function Get-FullPath {
     return [System.IO.Path]::GetFullPath($Path)
 }
 
+function Test-PathWithinRoot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Candidate
+    )
+
+    $rootFull = Get-FullPath $Root
+    $candidateFull = Get-FullPath $Candidate
+    $comparison = [System.StringComparison]::Ordinal
+    if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+        $comparison = [System.StringComparison]::OrdinalIgnoreCase
+    }
+    if ($candidateFull.Equals($rootFull, $comparison)) {
+        return $true
+    }
+    $trimChars = [char[]]@(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $prefix = $rootFull.TrimEnd($trimChars) + [System.IO.Path]::DirectorySeparatorChar
+    return $candidateFull.StartsWith($prefix, $comparison)
+}
+
+function Resolve-SafeRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RelativePath) -or [System.IO.Path]::IsPathRooted($RelativePath)) {
+        throw "Manifest relative path must be a non-empty relative path: $RelativePath"
+    }
+    $nativeRelative = $RelativePath.Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+    $candidate = Get-FullPath (Join-Path $Root $nativeRelative)
+    if (-not (Test-PathWithinRoot -Root $Root -Candidate $candidate) -or $candidate -eq (Get-FullPath $Root)) {
+        throw "Manifest relative path escapes the OpenCode target root: $RelativePath"
+    }
+    return $candidate
+}
+
+function Assert-SafeBackupPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Target,
+        [Parameter(Mandatory = $true)][string]$BackupPath
+    )
+
+    $backupRoot = Get-FullPath (Join-Path $Target ".erasmus-backups")
+    if (-not (Test-PathWithinRoot -Root $backupRoot -Candidate $BackupPath)) {
+        throw "Manifest backup path escapes the Erasmus backup root: $BackupPath"
+    }
+}
+
 function Get-Sha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -125,8 +177,9 @@ function Get-InstallMutations {
 
     $mutations = @()
     foreach ($sourceEntry in $SourceEntries) {
-        $nativeRelative = Convert-RelativePathToNative $sourceEntry.relative_path
-        $destination = Join-Path $Target $nativeRelative
+        $destination = Resolve-SafeRelativePath `
+            -Root $Target `
+            -RelativePath ([string]$sourceEntry.relative_path)
         $exists = Test-Path -LiteralPath $destination -PathType Leaf
         if ($exists -and (Get-Sha256 $destination) -eq $sourceEntry.source_sha256) {
             continue
@@ -134,6 +187,7 @@ function Get-InstallMutations {
 
         $backupPath = $null
         if ($exists) {
+            $nativeRelative = Convert-RelativePathToNative $sourceEntry.relative_path
             $backupPath = Join-Path $BackupRoot $nativeRelative
         }
 
@@ -263,7 +317,14 @@ function Read-Manifest {
     if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
         throw "Erasmus install manifest not found: $ManifestPath"
     }
-    return Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $manifest = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($null -eq $manifest.schema_version -or [int]$manifest.schema_version -ne 1) {
+        throw "Unsupported Erasmus install manifest schema version."
+    }
+    if ($null -eq $manifest.entries) {
+        throw "Erasmus install manifest has no entries."
+    }
+    return $manifest
 }
 
 function Get-RollbackPlan {
@@ -274,16 +335,23 @@ function Get-RollbackPlan {
 
     $plan = @()
     foreach ($entry in @($Manifest.entries)) {
-        $nativeRelative = Convert-RelativePathToNative ([string]$entry.relative_path)
-        $destination = Join-Path $Target $nativeRelative
+        $relativePath = [string]$entry.relative_path
+        $destination = Resolve-SafeRelativePath -Root $Target -RelativePath $relativePath
+        $installedSha = [string]$entry.installed_sha256
+        if ($installedSha -notmatch "^[0-9a-f]{64}$") {
+            throw "Manifest entry has an invalid SHA-256 digest: $relativePath"
+        }
         $exists = Test-Path -LiteralPath $destination -PathType Leaf
-        if ($exists -and (Get-Sha256 $destination) -ne [string]$entry.installed_sha256) {
+        if ($exists -and (Get-Sha256 $destination) -ne $installedSha) {
             throw "Refusing to overwrite or remove modified file during rollback: $destination"
         }
 
         $backupPath = [string]$entry.backup_path
-        if (-not [string]::IsNullOrWhiteSpace($backupPath) -and -not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
-            throw "Required rollback backup is missing: $backupPath"
+        if (-not [string]::IsNullOrWhiteSpace($backupPath)) {
+            Assert-SafeBackupPath -Target $Target -BackupPath $backupPath
+            if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+                throw "Required rollback backup is missing: $backupPath"
+            }
         }
 
         $plan += [PSCustomObject]@{
@@ -328,8 +396,11 @@ function Rollback-OneManifest {
     $manifest = Read-Manifest $ManifestPath
     $plan = @(Get-RollbackPlan -Manifest $manifest -Target $Target)
     $previousManifest = [string]$manifest.previous_manifest_backup
-    if (-not [string]::IsNullOrWhiteSpace($previousManifest) -and -not (Test-Path -LiteralPath $previousManifest -PathType Leaf)) {
-        throw "Previous install manifest backup is missing: $previousManifest"
+    if (-not [string]::IsNullOrWhiteSpace($previousManifest)) {
+        Assert-SafeBackupPath -Target $Target -BackupPath $previousManifest
+        if (-not (Test-Path -LiteralPath $previousManifest -PathType Leaf)) {
+            throw "Previous install manifest backup is missing: $previousManifest"
+        }
     }
 
     if (-not $PSCmdlet.ShouldProcess($Target, "$Operation the latest Erasmus OpenCode installation layer")) {

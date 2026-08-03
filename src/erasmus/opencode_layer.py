@@ -33,6 +33,7 @@ AGENT_FIELDS = frozenset(
 )
 AGENT_PERMISSION_FIELDS = frozenset(
     {
+        "*",
         "read",
         "edit",
         "glob",
@@ -58,7 +59,7 @@ REQUIRED_SKILL_SECTIONS = (
     "## Stop condition",
 )
 AUTHORITY_SENTENCE = "The Erasmus runtime remains authoritative."
-EXPECTED_SKILLS = frozenset(
+REQUIRED_SKILLS = frozenset(
     {
         "erasmus-router",
         "erasmus-setup",
@@ -73,7 +74,7 @@ EXPECTED_SKILLS = frozenset(
         "erasmus-doctor",
     }
 )
-EXPECTED_COMMANDS = frozenset(
+REQUIRED_COMMANDS = frozenset(
     {
         "erasmus",
         "erasmus-setup",
@@ -84,6 +85,9 @@ EXPECTED_COMMANDS = frozenset(
         "erasmus-handoff",
         "erasmus-doctor",
     }
+)
+REQUIRED_INSTRUCTIONS = frozenset(
+    {"CONTEXT.md", "constitution/immutable-contract.md", "docs/architecture.md"}
 )
 
 
@@ -103,6 +107,13 @@ def _parse_scalar(value: str) -> object:
     if re.fullmatch(r"-?(?:[0-9]+\.[0-9]*|[0-9]*\.[0-9]+)", value):
         return float(value)
     return value
+
+
+def _parse_key(value: str) -> str:
+    parsed = _parse_scalar(value)
+    if not isinstance(parsed, str) or not parsed:
+        raise FrontmatterError("frontmatter keys must be non-empty strings")
+    return parsed
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
@@ -132,9 +143,11 @@ def parse_frontmatter(text: str) -> tuple[dict[str, object], str]:
         stripped = raw_line.strip()
         if ":" not in stripped:
             raise FrontmatterError(f"line {number}: expected key: value")
-        key, value = (part.strip() for part in stripped.split(":", 1))
-        if not key:
-            raise FrontmatterError(f"line {number}: empty key")
+        raw_key, value = (part.strip() for part in stripped.split(":", 1))
+        try:
+            key = _parse_key(raw_key)
+        except FrontmatterError as error:
+            raise FrontmatterError(f"line {number}: {error}") from error
 
         if indent == 0:
             if key in data:
@@ -180,7 +193,11 @@ def _validate_skill(path: Path) -> tuple[str | None, list[str]]:
         errors.append(f"{path}: unsupported skill frontmatter fields: {', '.join(unknown)}")
 
     name = data.get("name")
-    if not isinstance(name, str) or not SKILL_NAME_RE.fullmatch(name):
+    if (
+        not isinstance(name, str)
+        or len(name) > 64
+        or not SKILL_NAME_RE.fullmatch(name)
+    ):
         errors.append(f"{path}: invalid or missing skill name")
         normalized_name: str | None = None
     else:
@@ -195,6 +212,20 @@ def _validate_skill(path: Path) -> tuple[str | None, list[str]]:
         errors.append(f"{path}: description must be a non-empty string")
     elif len(description) > 1024:
         errors.append(f"{path}: description exceeds 1024 characters")
+
+    for optional_string in ("license", "compatibility"):
+        if optional_string in data and (
+            not isinstance(data[optional_string], str)
+            or not str(data[optional_string]).strip()
+        ):
+            errors.append(f"{path}: {optional_string} must be a non-empty string")
+
+    metadata = data.get("metadata")
+    if metadata is not None and (
+        not isinstance(metadata, dict)
+        or any(not isinstance(key, str) or not isinstance(value, str) for key, value in metadata.items())
+    ):
+        errors.append(f"{path}: metadata must be a string-to-string mapping")
 
     for section in REQUIRED_SKILL_SECTIONS:
         if section not in body:
@@ -211,6 +242,9 @@ def _validate_command(path: Path, skill_names: frozenset[str]) -> list[str]:
         data, body = parse_frontmatter(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, FrontmatterError) as error:
         return [f"{path}: {error}"]
+
+    if len(path.stem) > 64 or not SKILL_NAME_RE.fullmatch(path.stem):
+        errors.append(f"{path}: command filename must be lowercase kebab-case")
 
     unknown = _unknown_fields(data, COMMAND_FIELDS)
     if unknown:
@@ -266,6 +300,8 @@ def _validate_agent(path: Path) -> list[str]:
                 errors.append(
                     f"{path}: permission '{key}' must be allow, ask, or deny"
                 )
+        if permission.get("*") != "ask":
+            errors.append(f"{path}: unknown OpenCode actions must default to ask")
         if permission.get("skill") != "allow":
             errors.append(f"{path}: Erasmus agent must allow the native skill tool")
 
@@ -298,21 +334,15 @@ def validate_opencode_layer(root: Path) -> tuple[str, ...]:
                 seen[name] = skill_file
 
     skill_names = frozenset(seen)
-    missing_skills = sorted(EXPECTED_SKILLS - skill_names)
-    extra_skills = sorted(skill_names - EXPECTED_SKILLS)
+    missing_skills = sorted(REQUIRED_SKILLS - skill_names)
     if missing_skills:
-        errors.append(f"{skills_root}: missing expected skills: {', '.join(missing_skills)}")
-    if extra_skills:
-        errors.append(f"{skills_root}: undeclared initial skills: {', '.join(extra_skills)}")
+        errors.append(f"{skills_root}: missing required skills: {', '.join(missing_skills)}")
 
     command_files = sorted(commands_root.glob("*.md")) if commands_root.is_dir() else []
     command_names = frozenset(path.stem for path in command_files)
-    missing_commands = sorted(EXPECTED_COMMANDS - command_names)
-    extra_commands = sorted(command_names - EXPECTED_COMMANDS)
+    missing_commands = sorted(REQUIRED_COMMANDS - command_names)
     if missing_commands:
-        errors.append(f"{commands_root}: missing expected commands: {', '.join(missing_commands)}")
-    if extra_commands:
-        errors.append(f"{commands_root}: undeclared initial commands: {', '.join(extra_commands)}")
+        errors.append(f"{commands_root}: missing required commands: {', '.join(missing_commands)}")
     for command_file in command_files:
         errors.extend(_validate_command(command_file, skill_names))
 
@@ -327,12 +357,23 @@ def validate_opencode_layer(root: Path) -> tuple[str, ...]:
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         errors.append(f"{config_path}: {error}")
     else:
-        if _contains_key(config, frozenset({"model", "provider"})):
-            errors.append(f"{config_path}: project configuration must not pin provider/model")
-        instructions = config.get("instructions") if isinstance(config, dict) else None
-        required = {"CONTEXT.md", "constitution/immutable-contract.md", "docs/architecture.md"}
-        if not isinstance(instructions, list) or not required.issubset(set(instructions)):
-            errors.append(f"{config_path}: required instruction files are missing")
+        if not isinstance(config, dict):
+            errors.append(f"{config_path}: project configuration must be a JSON object")
+        else:
+            if _contains_key(config, frozenset({"model", "provider"})):
+                errors.append(f"{config_path}: project configuration must not pin provider/model")
+            instructions = config.get("instructions")
+            if not isinstance(instructions, list) or not REQUIRED_INSTRUCTIONS.issubset(set(instructions)):
+                errors.append(f"{config_path}: required instruction files are missing")
+            else:
+                for instruction in sorted(REQUIRED_INSTRUCTIONS):
+                    if not (root / instruction).is_file():
+                        errors.append(f"{config_path}: instruction path does not exist: {instruction}")
+
+            permission = config.get("permission")
+            skill_permission = permission.get("skill") if isinstance(permission, dict) else None
+            if not isinstance(skill_permission, dict) or skill_permission.get("*") != "allow":
+                errors.append(f"{config_path}: native skill discovery must be explicitly allowed")
 
     context_path = root / "CONTEXT.md"
     try:

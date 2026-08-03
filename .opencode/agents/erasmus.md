@@ -7,9 +7,11 @@ permission:
   read: allow
   glob: allow
   grep: allow
+  list: allow
   lsp: allow
   skill: allow
   question: allow
+  todowrite: allow
   edit: ask
   bash: ask
   task: ask

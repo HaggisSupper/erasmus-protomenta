@@ -234,7 +234,7 @@ function Rollback-OneManifest {
         if (Test-Path -LiteralPath $destination -PathType Leaf) {
             $currentHash = Get-Sha256 $destination
             if ($currentHash -ne [string]$entry.installed_sha256) {
-                throw "Refusing to overwrite or remove modified file during $Operation: $destination"
+                throw "Refusing to overwrite or remove modified file during ${Operation}: $destination"
             }
         }
 

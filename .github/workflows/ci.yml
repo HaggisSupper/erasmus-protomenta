@@ -34,6 +34,9 @@ jobs:
           pip install pytest
           pip install -e .
 
+      - name: Validate OpenCode Erasmus layer
+        run: python scripts/validate_opencode_layer.py
+
       - name: Run tests
         run: python -m pytest tests/ -v
 
@@ -42,4 +45,3 @@ jobs:
           python scripts/validate_contract.py contracts/fixtures/valid_task.json
         env:
           PYTHONPATH: src
-

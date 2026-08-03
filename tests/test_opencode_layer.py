@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -312,6 +313,31 @@ def test_powershell_installer_refuses_to_rollback_post_install_edits(tmp_path: P
     assert rolled_back.returncode != 0
     assert agent.read_text(encoding="utf-8") == "post-install-operator-edit\n"
     assert (target / "erasmus-install-manifest.json").is_file()
+
+
+def test_powershell_installer_rejects_manifest_path_traversal(tmp_path: Path) -> None:
+    executable = _powershell()
+    if executable is None:
+        pytest.skip("PowerShell is not available")
+
+    target = tmp_path / "opencode"
+    installed = _run_installer(executable, target, "Install")
+    assert installed.returncode == 0, installed.stderr
+
+    outside = tmp_path / "outside.md"
+    outside.write_text("do-not-touch\n", encoding="utf-8")
+    manifest_path = target / "erasmus-install-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["entries"][0]["relative_path"] = "../../outside.md"
+    manifest["entries"][0]["installed_sha256"] = hashlib.sha256(
+        outside.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    rolled_back = _run_installer(executable, target, "Rollback")
+    assert rolled_back.returncode != 0
+    assert outside.read_text(encoding="utf-8") == "do-not-touch\n"
+    assert manifest_path.is_file()
 
 
 def test_powershell_installer_invalid_source_does_not_mutate_target(tmp_path: Path) -> None:

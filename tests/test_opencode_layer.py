@@ -115,6 +115,19 @@ Stop when the failure is deterministically resolved.
     assert validate_opencode_layer(root) == ()
 
 
+def test_non_erasmus_skill_namespace_fails(tmp_path: Path) -> None:
+    root = _copy_layer(tmp_path)
+    source = root / ".opencode" / "skills" / "erasmus-tdd" / "SKILL.md"
+    skill = root / ".opencode" / "skills" / "other-skill" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        source.read_text(encoding="utf-8").replace("name: erasmus-tdd", "name: other-skill"),
+        encoding="utf-8",
+    )
+    errors = validate_opencode_layer(root)
+    assert any("must use the erasmus- namespace" in error for error in errors)
+
+
 def test_skill_name_over_64_characters_fails(tmp_path: Path) -> None:
     root = _copy_layer(tmp_path)
     long_name = "a" * 65
@@ -169,6 +182,14 @@ def test_command_reference_to_missing_skill_fails(tmp_path: Path) -> None:
     assert any("referenced skill 'erasmus-missing' does not exist" in error for error in errors)
 
 
+def test_non_erasmus_command_namespace_fails(tmp_path: Path) -> None:
+    root = _copy_layer(tmp_path)
+    source = root / ".opencode" / "commands" / "erasmus.md"
+    shutil.copy2(source, root / ".opencode" / "commands" / "help.md")
+    errors = validate_opencode_layer(root)
+    assert any("must use the erasmus namespace" in error for error in errors)
+
+
 def test_agent_model_pin_fails(tmp_path: Path) -> None:
     root = _copy_layer(tmp_path)
     agent = root / ".opencode" / "agents" / "erasmus.md"
@@ -180,15 +201,25 @@ def test_agent_model_pin_fails(tmp_path: Path) -> None:
     assert any("unsupported agent frontmatter fields: model" in error for error in errors)
 
 
+def test_documented_list_and_todowrite_permissions_are_allowed(tmp_path: Path) -> None:
+    root = _copy_layer(tmp_path)
+    agent = root / ".opencode" / "agents" / "erasmus.md"
+    text = agent.read_text(encoding="utf-8").replace(
+        "  doom_loop: ask", "  list: allow\n  todowrite: allow\n  doom_loop: ask"
+    )
+    agent.write_text(text, encoding="utf-8")
+    assert validate_opencode_layer(root) == ()
+
+
 def test_agent_unknown_permission_fails(tmp_path: Path) -> None:
     root = _copy_layer(tmp_path)
     agent = root / ".opencode" / "agents" / "erasmus.md"
     text = agent.read_text(encoding="utf-8").replace(
-        "  doom_loop: ask", "  doom_loop: ask\n  todowrite: allow"
+        "  doom_loop: ask", "  doom_loop: ask\n  made_up_tool: allow"
     )
     agent.write_text(text, encoding="utf-8")
     errors = validate_opencode_layer(root)
-    assert any("unsupported permission fields: todowrite" in error for error in errors)
+    assert any("unsupported permission fields: made_up_tool" in error for error in errors)
 
 
 def test_agent_wildcard_permission_must_default_to_ask(tmp_path: Path) -> None:

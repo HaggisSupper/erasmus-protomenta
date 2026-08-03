@@ -38,11 +38,13 @@ AGENT_PERMISSION_FIELDS = frozenset(
         "edit",
         "glob",
         "grep",
+        "list",
         "bash",
         "task",
         "skill",
         "lsp",
         "question",
+        "todowrite",
         "webfetch",
         "websearch",
         "external_directory",
@@ -181,6 +183,10 @@ def _unknown_fields(data: Mapping[str, object], allowed: frozenset[str]) -> list
     return sorted(set(data) - allowed)
 
 
+def _is_erasmus_namespace(name: str) -> bool:
+    return name == "erasmus" or name.startswith("erasmus-")
+
+
 def _validate_skill(path: Path) -> tuple[str | None, list[str]]:
     errors: list[str] = []
     try:
@@ -202,6 +208,8 @@ def _validate_skill(path: Path) -> tuple[str | None, list[str]]:
         normalized_name: str | None = None
     else:
         normalized_name = name
+        if not _is_erasmus_namespace(name):
+            errors.append(f"{path}: globally installable skill must use the erasmus- namespace")
         if path.parent.name != name:
             errors.append(
                 f"{path}: skill name '{name}' must match directory '{path.parent.name}'"
@@ -245,6 +253,8 @@ def _validate_command(path: Path, skill_names: frozenset[str]) -> list[str]:
 
     if len(path.stem) > 64 or not SKILL_NAME_RE.fullmatch(path.stem):
         errors.append(f"{path}: command filename must be lowercase kebab-case")
+    elif not _is_erasmus_namespace(path.stem):
+        errors.append(f"{path}: globally installable command must use the erasmus namespace")
 
     unknown = _unknown_fields(data, COMMAND_FIELDS)
     if unknown:

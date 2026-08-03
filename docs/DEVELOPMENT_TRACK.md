@@ -108,3 +108,11 @@ The accepted target architecture for adaptive problem routing and experience-gui
 - [`docs/adr/ADR-ROUTING-001-adaptive-routing-as-deferred-extension.md`](adr/ADR-ROUTING-001-adaptive-routing-as-deferred-extension.md)
 
 This target does not alter the locked Phase 1–3 sequence or authorize implementation. Its namespaced schemas are experimental and non-authoritative. Any promoted increment requires a concrete observed need, a fresh bounded mission, additive or versioned contracts, disabled-by-default or observation-only rollout where applicable, deterministic and negative tests, rollback, 10th-Man review, and preservation of the current deterministic fallback.
+
+## Deferred engineering-platform requirements
+
+The additional accepted requirements for Erasmus as a persistent engineering operating platform are documented in:
+
+- [`docs/requirements/ERASMUS_ENGINEERING_PLATFORM_REQUIREMENTS_ADDENDUM.md`](requirements/ERASMUS_ENGINEERING_PLATFORM_REQUIREMENTS_ADDENDUM.md)
+
+The addendum covers the bootstrap control plane, persistent runtime kernel, durable engineering memory, graph-grounded world model, executable skill library, deterministic tool layer, agent quality gates, technical reconnaissance, local-first inference, multi-agent council, and eventual engineering-platform scope. It is subordinate to this development track and does not authorize broad implementation. Each requirement must be promoted independently through a bounded mission in architectural dependency order.

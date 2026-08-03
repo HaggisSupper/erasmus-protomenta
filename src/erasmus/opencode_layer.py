@@ -31,6 +31,24 @@ AGENT_FIELDS = frozenset(
         "permission",
     }
 )
+AGENT_PERMISSION_FIELDS = frozenset(
+    {
+        "read",
+        "edit",
+        "glob",
+        "grep",
+        "bash",
+        "task",
+        "skill",
+        "lsp",
+        "question",
+        "webfetch",
+        "websearch",
+        "external_directory",
+        "doom_loop",
+    }
+)
+PERMISSION_ACTIONS = frozenset({"allow", "ask", "deny"})
 REQUIRED_SKILL_SECTIONS = (
     "## Trigger",
     "## Authority boundary",
@@ -233,9 +251,24 @@ def _validate_agent(path: Path) -> list[str]:
         errors.append(f"{path}: unsupported agent frontmatter fields: {', '.join(unknown)}")
     if data.get("mode") != "primary":
         errors.append(f"{path}: Erasmus agent mode must be 'primary'")
+
     permission = data.get("permission")
-    if not isinstance(permission, dict) or permission.get("skill") != "allow":
-        errors.append(f"{path}: Erasmus agent must allow the native skill tool")
+    if not isinstance(permission, dict):
+        errors.append(f"{path}: Erasmus agent permission must be a mapping")
+    else:
+        unknown_permissions = _unknown_fields(permission, AGENT_PERMISSION_FIELDS)
+        if unknown_permissions:
+            errors.append(
+                f"{path}: unsupported permission fields: {', '.join(unknown_permissions)}"
+            )
+        for key, action in sorted(permission.items()):
+            if not isinstance(action, str) or action not in PERMISSION_ACTIONS:
+                errors.append(
+                    f"{path}: permission '{key}' must be allow, ask, or deny"
+                )
+        if permission.get("skill") != "allow":
+            errors.append(f"{path}: Erasmus agent must allow the native skill tool")
+
     if AUTHORITY_SENTENCE not in body:
         errors.append(f"{path}: agent must preserve the authoritative runtime boundary")
     return errors

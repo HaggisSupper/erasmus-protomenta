@@ -204,10 +204,11 @@ def test_agent_model_pin_fails(tmp_path: Path) -> None:
 def test_documented_list_and_todowrite_permissions_are_allowed(tmp_path: Path) -> None:
     root = _copy_layer(tmp_path)
     agent = root / ".opencode" / "agents" / "erasmus.md"
-    text = agent.read_text(encoding="utf-8").replace(
-        "  doom_loop: ask", "  list: allow\n  todowrite: allow\n  doom_loop: ask"
-    )
-    agent.write_text(text, encoding="utf-8")
+    data, _ = parse_frontmatter(agent.read_text(encoding="utf-8"))
+    permission = data["permission"]
+    assert isinstance(permission, dict)
+    assert permission["list"] == "allow"
+    assert permission["todowrite"] == "allow"
     assert validate_opencode_layer(root) == ()
 
 

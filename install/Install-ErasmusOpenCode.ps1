@@ -28,16 +28,21 @@ function Convert-RelativePathToNative {
     return $Path.Replace("/", [System.IO.Path]::DirectorySeparatorChar)
 }
 
+function Ensure-ParentDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $directory = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+}
+
 function Copy-FileAtomically {
     param(
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][string]$Destination
     )
 
-    $directory = Split-Path -Parent $Destination
-    if (-not (Test-Path -LiteralPath $directory)) {
-        New-Item -ItemType Directory -Path $directory -Force | Out-Null
-    }
+    Ensure-ParentDirectory $Destination
     $temporary = "$Destination.erasmus.$([Guid]::NewGuid().ToString('N')).tmp"
     try {
         Copy-Item -LiteralPath $Source -Destination $temporary -Force
@@ -56,10 +61,7 @@ function Write-JsonAtomically {
         [Parameter(Mandatory = $true)][string]$Destination
     )
 
-    $directory = Split-Path -Parent $Destination
-    if (-not (Test-Path -LiteralPath $directory)) {
-        New-Item -ItemType Directory -Path $directory -Force | Out-Null
-    }
+    Ensure-ParentDirectory $Destination
     $temporary = "$Destination.erasmus.$([Guid]::NewGuid().ToString('N')).tmp"
     $encoding = New-Object System.Text.UTF8Encoding($false)
     try {
@@ -114,6 +116,64 @@ function Get-SourceEntries {
     return @($entries)
 }
 
+function Get-InstallMutations {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$SourceEntries,
+        [Parameter(Mandatory = $true)][string]$Target,
+        [Parameter(Mandatory = $true)][string]$BackupRoot
+    )
+
+    $mutations = @()
+    foreach ($sourceEntry in $SourceEntries) {
+        $nativeRelative = Convert-RelativePathToNative $sourceEntry.relative_path
+        $destination = Join-Path $Target $nativeRelative
+        $exists = Test-Path -LiteralPath $destination -PathType Leaf
+        if ($exists -and (Get-Sha256 $destination) -eq $sourceEntry.source_sha256) {
+            continue
+        }
+
+        $backupPath = $null
+        if ($exists) {
+            $backupPath = Join-Path $BackupRoot $nativeRelative
+        }
+
+        $mutations += [PSCustomObject]@{
+            source_path = $sourceEntry.source_path
+            relative_path = $sourceEntry.relative_path
+            source_sha256 = $sourceEntry.source_sha256
+            target_path = $destination
+            created_by_install = -not $exists
+            backup_path = $backupPath
+        }
+    }
+    return @($mutations)
+}
+
+function Restore-InstallTransaction {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Completed,
+        [Parameter(Mandatory = $true)][string]$ManifestPath,
+        [AllowNull()][string]$PreviousManifestBackup
+    )
+
+    for ($index = $Completed.Count - 1; $index -ge 0; $index--) {
+        $mutation = $Completed[$index]
+        if (-not [string]::IsNullOrWhiteSpace([string]$mutation.backup_path)) {
+            Copy-FileAtomically -Source $mutation.backup_path -Destination $mutation.target_path
+        }
+        elseif ([bool]$mutation.created_by_install -and (Test-Path -LiteralPath $mutation.target_path -PathType Leaf)) {
+            Remove-Item -LiteralPath $mutation.target_path -Force
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($PreviousManifestBackup)) {
+        Copy-FileAtomically -Source $PreviousManifestBackup -Destination $ManifestPath
+    }
+    elseif (Test-Path -LiteralPath $ManifestPath -PathType Leaf) {
+        Remove-Item -LiteralPath $ManifestPath -Force
+    }
+}
+
 function Install-Layer {
     param(
         [Parameter(Mandatory = $true)][string]$Root,
@@ -126,34 +186,15 @@ function Install-Layer {
     $manifestPath = Join-Path $Target "erasmus-install-manifest.json"
     $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffffffZ")
     $backupRoot = Join-Path $Target ".erasmus-backups\$timestamp"
-    $mutations = @()
-
-    foreach ($sourceEntry in $sourceEntries) {
-        $nativeRelative = Convert-RelativePathToNative $sourceEntry.relative_path
-        $destination = Join-Path $Target $nativeRelative
-        $exists = Test-Path -LiteralPath $destination -PathType Leaf
-        if ($exists -and (Get-Sha256 $destination) -eq $sourceEntry.source_sha256) {
-            continue
-        }
-
-        $backupPath = $null
-        $createdByInstall = -not $exists
-        if ($exists) {
-            $backupPath = Join-Path $backupRoot $nativeRelative
-        }
-
-        $mutations += [PSCustomObject]@{
-            source_path = $sourceEntry.source_path
-            relative_path = $sourceEntry.relative_path
-            source_sha256 = $sourceEntry.source_sha256
-            target_path = $destination
-            created_by_install = $createdByInstall
-            backup_path = $backupPath
-        }
-    }
+    $mutations = Get-InstallMutations -SourceEntries $sourceEntries -Target $Target -BackupRoot $backupRoot
 
     if ($mutations.Count -eq 0) {
         Write-Output "Erasmus OpenCode layer is already current."
+        return
+    }
+
+    $description = "$Operation $($mutations.Count) OpenCode interaction file(s)"
+    if (-not $PSCmdlet.ShouldProcess($Target, $description)) {
         return
     }
 
@@ -162,46 +203,50 @@ function Install-Layer {
         $previousManifestBackup = Join-Path $backupRoot "erasmus-install-manifest.previous.json"
     }
 
-    foreach ($mutation in $mutations) {
-        $description = "$Operation $($mutation.relative_path)"
-        if ($PSCmdlet.ShouldProcess($mutation.target_path, $description)) {
-            if ($null -ne $mutation.backup_path) {
-                $backupDirectory = Split-Path -Parent $mutation.backup_path
-                if (-not (Test-Path -LiteralPath $backupDirectory)) {
-                    New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
-                }
-                Copy-FileAtomically -Source $mutation.target_path -Destination $mutation.backup_path
-            }
-            Copy-FileAtomically -Source $mutation.source_path -Destination $mutation.target_path
-        }
-    }
-
-    if ($null -ne $previousManifestBackup -and $PSCmdlet.ShouldProcess($previousManifestBackup, "Back up previous Erasmus install manifest")) {
+    # Complete every backup before mutating any target file.
+    if ($null -ne $previousManifestBackup) {
         Copy-FileAtomically -Source $manifestPath -Destination $previousManifestBackup
     }
-
-    $manifestEntries = @()
     foreach ($mutation in $mutations) {
-        $manifestEntries += [ordered]@{
-            relative_path = $mutation.relative_path
-            installed_sha256 = $mutation.source_sha256
-            created_by_install = [bool]$mutation.created_by_install
-            backup_path = $mutation.backup_path
+        if (-not [string]::IsNullOrWhiteSpace([string]$mutation.backup_path)) {
+            Copy-FileAtomically -Source $mutation.target_path -Destination $mutation.backup_path
         }
     }
 
-    $manifest = [ordered]@{
-        schema_version = 1
-        action = $Operation
-        created_at_utc = (Get-Date).ToUniversalTime().ToString("o")
-        source_root = $Root
-        target_root = $Target
-        previous_manifest_backup = $previousManifestBackup
-        entries = $manifestEntries
-    }
+    $completed = @()
+    try {
+        foreach ($mutation in $mutations) {
+            Copy-FileAtomically -Source $mutation.source_path -Destination $mutation.target_path
+            $completed += $mutation
+        }
 
-    if ($PSCmdlet.ShouldProcess($manifestPath, "Write Erasmus install manifest")) {
+        $manifestEntries = @()
+        foreach ($mutation in $mutations) {
+            $manifestEntries += [ordered]@{
+                relative_path = $mutation.relative_path
+                installed_sha256 = $mutation.source_sha256
+                created_by_install = [bool]$mutation.created_by_install
+                backup_path = $mutation.backup_path
+            }
+        }
+
+        $manifest = [ordered]@{
+            schema_version = 1
+            action = $Operation
+            created_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+            source_root = $Root
+            target_root = $Target
+            previous_manifest_backup = $previousManifestBackup
+            entries = $manifestEntries
+        }
         Write-JsonAtomically -Value $manifest -Destination $manifestPath
+    }
+    catch {
+        Restore-InstallTransaction `
+            -Completed $completed `
+            -ManifestPath $manifestPath `
+            -PreviousManifestBackup $previousManifestBackup
+        throw
     }
 
     Write-Output "$Operation completed: $($mutations.Count) file(s) changed."
@@ -216,6 +261,57 @@ function Read-Manifest {
     return Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
+function Get-RollbackPlan {
+    param(
+        [Parameter(Mandatory = $true)][object]$Manifest,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+
+    $plan = @()
+    foreach ($entry in @($Manifest.entries)) {
+        $nativeRelative = Convert-RelativePathToNative ([string]$entry.relative_path)
+        $destination = Join-Path $Target $nativeRelative
+        $exists = Test-Path -LiteralPath $destination -PathType Leaf
+        if ($exists -and (Get-Sha256 $destination) -ne [string]$entry.installed_sha256) {
+            throw "Refusing to overwrite or remove modified file during rollback: $destination"
+        }
+
+        $backupPath = [string]$entry.backup_path
+        if (-not [string]::IsNullOrWhiteSpace($backupPath) -and -not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+            throw "Required rollback backup is missing: $backupPath"
+        }
+
+        $plan += [PSCustomObject]@{
+            destination = $destination
+            existed_before_rollback = $exists
+            backup_path = $backupPath
+            created_by_install = [bool]$entry.created_by_install
+        }
+    }
+    return @($plan)
+}
+
+function Restore-RollbackTransaction {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Plan,
+        [Parameter(Mandatory = $true)][string]$TransactionRoot,
+        [Parameter(Mandatory = $true)][string]$ManifestPath,
+        [Parameter(Mandatory = $true)][string]$ManifestTransactionBackup
+    )
+
+    foreach ($item in $Plan) {
+        $relative = $item.destination.Substring($TargetRoot.Length).TrimStart("\", "/")
+        $transactionCopy = Join-Path $TransactionRoot $relative
+        if ([bool]$item.existed_before_rollback) {
+            Copy-FileAtomically -Source $transactionCopy -Destination $item.destination
+        }
+        elseif (Test-Path -LiteralPath $item.destination -PathType Leaf) {
+            Remove-Item -LiteralPath $item.destination -Force
+        }
+    }
+    Copy-FileAtomically -Source $ManifestTransactionBackup -Destination $ManifestPath
+}
+
 function Rollback-OneManifest {
     param(
         [Parameter(Mandatory = $true)][string]$Target,
@@ -224,47 +320,54 @@ function Rollback-OneManifest {
     )
 
     $manifest = Read-Manifest $ManifestPath
-    $entries = @($manifest.entries)
+    $plan = Get-RollbackPlan -Manifest $manifest -Target $Target
+    $previousManifest = [string]$manifest.previous_manifest_backup
+    if (-not [string]::IsNullOrWhiteSpace($previousManifest) -and -not (Test-Path -LiteralPath $previousManifest -PathType Leaf)) {
+        throw "Previous install manifest backup is missing: $previousManifest"
+    }
 
-    for ($index = $entries.Count - 1; $index -ge 0; $index--) {
-        $entry = $entries[$index]
-        $nativeRelative = Convert-RelativePathToNative ([string]$entry.relative_path)
-        $destination = Join-Path $Target $nativeRelative
+    if (-not $PSCmdlet.ShouldProcess($Target, "$Operation the latest Erasmus OpenCode installation layer")) {
+        return $false
+    }
 
-        if (Test-Path -LiteralPath $destination -PathType Leaf) {
-            $currentHash = Get-Sha256 $destination
-            if ($currentHash -ne [string]$entry.installed_sha256) {
-                throw "Refusing to overwrite or remove modified file during ${Operation}: $destination"
-            }
-        }
-
-        $backupPath = [string]$entry.backup_path
-        if (-not [string]::IsNullOrWhiteSpace($backupPath)) {
-            if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
-                throw "Required rollback backup is missing: $backupPath"
-            }
-            if ($PSCmdlet.ShouldProcess($destination, "Restore pre-install file")) {
-                Copy-FileAtomically -Source $backupPath -Destination $destination
-            }
-        }
-        elseif ([bool]$entry.created_by_install -and (Test-Path -LiteralPath $destination -PathType Leaf)) {
-            if ($PSCmdlet.ShouldProcess($destination, "Remove Erasmus-created file")) {
-                Remove-Item -LiteralPath $destination -Force
-            }
+    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffffffZ")
+    $transactionRoot = Join-Path $Target ".erasmus-backups\rollback-$timestamp"
+    $manifestTransactionBackup = Join-Path $transactionRoot "erasmus-install-manifest.current.json"
+    Copy-FileAtomically -Source $ManifestPath -Destination $manifestTransactionBackup
+    foreach ($item in $plan) {
+        if ([bool]$item.existed_before_rollback) {
+            $relative = $item.destination.Substring($Target.Length).TrimStart("\", "/")
+            Copy-FileAtomically `
+                -Source $item.destination `
+                -Destination (Join-Path $transactionRoot $relative)
         }
     }
 
-    $previousManifest = [string]$manifest.previous_manifest_backup
-    if (-not [string]::IsNullOrWhiteSpace($previousManifest)) {
-        if (-not (Test-Path -LiteralPath $previousManifest -PathType Leaf)) {
-            throw "Previous install manifest backup is missing: $previousManifest"
+    try {
+        for ($index = $plan.Count - 1; $index -ge 0; $index--) {
+            $item = $plan[$index]
+            if (-not [string]::IsNullOrWhiteSpace([string]$item.backup_path)) {
+                Copy-FileAtomically -Source $item.backup_path -Destination $item.destination
+            }
+            elseif ([bool]$item.created_by_install -and (Test-Path -LiteralPath $item.destination -PathType Leaf)) {
+                Remove-Item -LiteralPath $item.destination -Force
+            }
         }
-        if ($PSCmdlet.ShouldProcess($ManifestPath, "Restore previous Erasmus install manifest")) {
+
+        if (-not [string]::IsNullOrWhiteSpace($previousManifest)) {
             Copy-FileAtomically -Source $previousManifest -Destination $ManifestPath
         }
+        elseif (Test-Path -LiteralPath $ManifestPath -PathType Leaf) {
+            Remove-Item -LiteralPath $ManifestPath -Force
+        }
     }
-    elseif ($PSCmdlet.ShouldProcess($ManifestPath, "Remove Erasmus install manifest")) {
-        Remove-Item -LiteralPath $ManifestPath -Force
+    catch {
+        Restore-RollbackTransaction `
+            -Plan $plan `
+            -TransactionRoot $transactionRoot `
+            -ManifestPath $ManifestPath `
+            -ManifestTransactionBackup $manifestTransactionBackup
+        throw
     }
 
     return $true
@@ -282,8 +385,10 @@ switch ($Action) {
         Install-Layer -Root $SourceRoot -Target $TargetRoot -Operation "Repair"
     }
     "Rollback" {
-        [void](Rollback-OneManifest -Target $TargetRoot -ManifestPath $manifestPath -Operation "Rollback")
-        Write-Output "Rollback completed."
+        $changed = Rollback-OneManifest -Target $TargetRoot -ManifestPath $manifestPath -Operation "Rollback"
+        if ($changed) {
+            Write-Output "Rollback completed."
+        }
     }
     "Uninstall" {
         $count = 0
@@ -293,9 +398,6 @@ switch ($Action) {
                 break
             }
             $count++
-            if ($WhatIfPreference) {
-                break
-            }
         }
         Write-Output "Uninstall completed: $count installation layer(s) reverted."
     }

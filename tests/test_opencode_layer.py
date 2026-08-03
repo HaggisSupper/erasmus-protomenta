@@ -17,6 +17,13 @@ def _copy_layer(destination: Path) -> Path:
     shutil.copytree(ROOT / ".opencode", destination / ".opencode")
     shutil.copy2(ROOT / "opencode.json", destination / "opencode.json")
     shutil.copy2(ROOT / "CONTEXT.md", destination / "CONTEXT.md")
+    (destination / "constitution").mkdir()
+    shutil.copy2(
+        ROOT / "constitution" / "immutable-contract.md",
+        destination / "constitution" / "immutable-contract.md",
+    )
+    (destination / "docs").mkdir()
+    shutil.copy2(ROOT / "docs" / "architecture.md", destination / "docs" / "architecture.md")
     return destination
 
 

@@ -151,7 +151,7 @@ function Get-InstallMutations {
 
 function Restore-InstallTransaction {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Completed,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Completed,
         [Parameter(Mandatory = $true)][string]$ManifestPath,
         [AllowNull()][string]$PreviousManifestBackup
     )
@@ -182,11 +182,16 @@ function Install-Layer {
     )
 
     Assert-ValidSourceLayer $Root
-    $sourceEntries = Get-SourceEntries $Root
+    $sourceEntries = @(Get-SourceEntries $Root)
     $manifestPath = Join-Path $Target "erasmus-install-manifest.json"
     $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffffffZ")
     $backupRoot = Join-Path $Target ".erasmus-backups\$timestamp"
-    $mutations = Get-InstallMutations -SourceEntries $sourceEntries -Target $Target -BackupRoot $backupRoot
+    $mutations = @(
+        Get-InstallMutations `
+            -SourceEntries $sourceEntries `
+            -Target $Target `
+            -BackupRoot $backupRoot
+    )
 
     if ($mutations.Count -eq 0) {
         Write-Output "Erasmus OpenCode layer is already current."
@@ -293,14 +298,15 @@ function Get-RollbackPlan {
 
 function Restore-RollbackTransaction {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Plan,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Plan,
+        [Parameter(Mandatory = $true)][string]$Target,
         [Parameter(Mandatory = $true)][string]$TransactionRoot,
         [Parameter(Mandatory = $true)][string]$ManifestPath,
         [Parameter(Mandatory = $true)][string]$ManifestTransactionBackup
     )
 
     foreach ($item in $Plan) {
-        $relative = $item.destination.Substring($TargetRoot.Length).TrimStart("\", "/")
+        $relative = $item.destination.Substring($Target.Length).TrimStart("\", "/")
         $transactionCopy = Join-Path $TransactionRoot $relative
         if ([bool]$item.existed_before_rollback) {
             Copy-FileAtomically -Source $transactionCopy -Destination $item.destination
@@ -320,7 +326,7 @@ function Rollback-OneManifest {
     )
 
     $manifest = Read-Manifest $ManifestPath
-    $plan = Get-RollbackPlan -Manifest $manifest -Target $Target
+    $plan = @(Get-RollbackPlan -Manifest $manifest -Target $Target)
     $previousManifest = [string]$manifest.previous_manifest_backup
     if (-not [string]::IsNullOrWhiteSpace($previousManifest) -and -not (Test-Path -LiteralPath $previousManifest -PathType Leaf)) {
         throw "Previous install manifest backup is missing: $previousManifest"
@@ -364,6 +370,7 @@ function Rollback-OneManifest {
     catch {
         Restore-RollbackTransaction `
             -Plan $plan `
+            -Target $Target `
             -TransactionRoot $transactionRoot `
             -ManifestPath $ManifestPath `
             -ManifestTransactionBackup $manifestTransactionBackup

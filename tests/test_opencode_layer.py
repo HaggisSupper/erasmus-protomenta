@@ -24,13 +24,13 @@ def test_repository_opencode_layer_is_valid() -> None:
     assert validate_opencode_layer(ROOT) == ()
 
 
-def test_frontmatter_parser_supports_one_nested_mapping() -> None:
+def test_frontmatter_parser_supports_one_nested_mapping_and_quoted_wildcard() -> None:
     data, body = parse_frontmatter(
-        "---\nname: example\npermission:\n  skill: allow\n  edit: ask\n---\n\nBody\n"
+        '---\nname: example\npermission:\n  "*": ask\n  skill: allow\n---\n\nBody\n'
     )
     assert data == {
         "name": "example",
-        "permission": {"skill": "allow", "edit": "ask"},
+        "permission": {"*": "ask", "skill": "allow"},
     }
     assert body == "Body"
 
@@ -63,6 +63,62 @@ def test_duplicate_skill_name_fails(tmp_path: Path) -> None:
     shutil.copytree(source, duplicate)
     errors = validate_opencode_layer(root)
     assert any("duplicate skill name 'erasmus-tdd'" in error for error in errors)
+
+
+def test_additional_valid_skill_is_allowed(tmp_path: Path) -> None:
+    root = _copy_layer(tmp_path)
+    skill = root / ".opencode" / "skills" / "erasmus-extra" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        """---
+name: erasmus-extra
+description: Prevent one explicitly documented repeated failure
+---
+
+# Extra bounded skill
+
+## Trigger
+
+Use only for the documented repeated failure.
+
+## Authority boundary
+
+The Erasmus runtime remains authoritative.
+
+## Deterministic evidence
+
+Inspect the exact failing artifact.
+
+## Workflow
+
+1. Reproduce the failure.
+2. Apply the bounded correction.
+
+## Output artifact
+
+A reviewable correction record.
+
+## Stop condition
+
+Stop when the failure is deterministically resolved.
+""",
+        encoding="utf-8",
+    )
+    assert validate_opencode_layer(root) == ()
+
+
+def test_skill_name_over_64_characters_fails(tmp_path: Path) -> None:
+    root = _copy_layer(tmp_path)
+    long_name = "a" * 65
+    skill = root / ".opencode" / "skills" / long_name / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    source = root / ".opencode" / "skills" / "erasmus-tdd" / "SKILL.md"
+    skill.write_text(
+        source.read_text(encoding="utf-8").replace("name: erasmus-tdd", f"name: {long_name}"),
+        encoding="utf-8",
+    )
+    errors = validate_opencode_layer(root)
+    assert any("invalid or missing skill name" in error for error in errors)
 
 
 def test_unsupported_skill_frontmatter_fails(tmp_path: Path) -> None:
@@ -127,6 +183,15 @@ def test_agent_unknown_permission_fails(tmp_path: Path) -> None:
     assert any("unsupported permission fields: todowrite" in error for error in errors)
 
 
+def test_agent_wildcard_permission_must_default_to_ask(tmp_path: Path) -> None:
+    root = _copy_layer(tmp_path)
+    agent = root / ".opencode" / "agents" / "erasmus.md"
+    text = agent.read_text(encoding="utf-8").replace('  "*": ask\n', "")
+    agent.write_text(text, encoding="utf-8")
+    errors = validate_opencode_layer(root)
+    assert any("unknown OpenCode actions must default to ask" in error for error in errors)
+
+
 def test_project_model_pin_fails(tmp_path: Path) -> None:
     root = _copy_layer(tmp_path)
     config_path = root / "opencode.json"
@@ -135,6 +200,31 @@ def test_project_model_pin_fails(tmp_path: Path) -> None:
     config_path.write_text(json.dumps(config), encoding="utf-8")
     errors = validate_opencode_layer(root)
     assert any("must not pin provider/model" in error for error in errors)
+
+
+def test_project_skill_discovery_permission_is_required(tmp_path: Path) -> None:
+    root = _copy_layer(tmp_path)
+    config_path = root / "opencode.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    del config["permission"]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    errors = validate_opencode_layer(root)
+    assert any("native skill discovery must be explicitly allowed" in error for error in errors)
+
+
+def test_required_instruction_path_must_exist(tmp_path: Path) -> None:
+    root = _copy_layer(tmp_path)
+    config_path = root / "opencode.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["instructions"].append("docs/missing.md")
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    # Only required paths are guaranteed by the layer; arbitrary operator paths are allowed.
+    assert validate_opencode_layer(root) == ()
+
+    config["instructions"].remove("constitution/immutable-contract.md")
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    errors = validate_opencode_layer(root)
+    assert any("required instruction files are missing" in error for error in errors)
 
 
 def _powershell() -> str | None:
@@ -147,6 +237,7 @@ def _run_installer(
     action: str,
     *,
     what_if: bool = False,
+    source_root: Path = ROOT,
 ) -> subprocess.CompletedProcess[str]:
     command = [
         executable,
@@ -158,7 +249,7 @@ def _run_installer(
         "-Action",
         action,
         "-SourceRoot",
-        str(ROOT),
+        str(source_root),
         "-TargetRoot",
         str(target),
     ]
@@ -197,3 +288,38 @@ def test_powershell_installer_dry_run_install_repair_and_rollback(tmp_path: Path
     rolled_back = _run_installer(executable, target, "Rollback")
     assert rolled_back.returncode == 0, rolled_back.stderr
     assert agent.read_text(encoding="utf-8") == "operator-local-agent\n"
+
+
+def test_powershell_installer_refuses_to_rollback_post_install_edits(tmp_path: Path) -> None:
+    executable = _powershell()
+    if executable is None:
+        pytest.skip("PowerShell is not available")
+
+    target = tmp_path / "opencode"
+    installed = _run_installer(executable, target, "Install")
+    assert installed.returncode == 0, installed.stderr
+    agent = target / "agents" / "erasmus.md"
+    agent.write_text("post-install-operator-edit\n", encoding="utf-8")
+
+    rolled_back = _run_installer(executable, target, "Rollback")
+    assert rolled_back.returncode != 0
+    assert agent.read_text(encoding="utf-8") == "post-install-operator-edit\n"
+    assert (target / "erasmus-install-manifest.json").is_file()
+
+
+def test_powershell_installer_invalid_source_does_not_mutate_target(tmp_path: Path) -> None:
+    executable = _powershell()
+    if executable is None:
+        pytest.skip("PowerShell is not available")
+
+    invalid_source = tmp_path / "invalid-source"
+    invalid_source.mkdir()
+    target = tmp_path / "opencode"
+    result = _run_installer(
+        executable,
+        target,
+        "Install",
+        source_root=invalid_source,
+    )
+    assert result.returncode != 0
+    assert not target.exists()

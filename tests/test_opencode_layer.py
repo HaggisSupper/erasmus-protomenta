@@ -108,10 +108,23 @@ def test_command_reference_to_missing_skill_fails(tmp_path: Path) -> None:
 def test_agent_model_pin_fails(tmp_path: Path) -> None:
     root = _copy_layer(tmp_path)
     agent = root / ".opencode" / "agents" / "erasmus.md"
-    text = agent.read_text(encoding="utf-8").replace("mode: primary", "mode: primary\nmodel: provider/model")
+    text = agent.read_text(encoding="utf-8").replace(
+        "mode: primary", "mode: primary\nmodel: provider/model"
+    )
     agent.write_text(text, encoding="utf-8")
     errors = validate_opencode_layer(root)
     assert any("unsupported agent frontmatter fields: model" in error for error in errors)
+
+
+def test_agent_unknown_permission_fails(tmp_path: Path) -> None:
+    root = _copy_layer(tmp_path)
+    agent = root / ".opencode" / "agents" / "erasmus.md"
+    text = agent.read_text(encoding="utf-8").replace(
+        "  doom_loop: ask", "  doom_loop: ask\n  todowrite: allow"
+    )
+    agent.write_text(text, encoding="utf-8")
+    errors = validate_opencode_layer(root)
+    assert any("unsupported permission fields: todowrite" in error for error in errors)
 
 
 def test_project_model_pin_fails(tmp_path: Path) -> None:

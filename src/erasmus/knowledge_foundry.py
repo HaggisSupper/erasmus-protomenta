@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import shutil
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -108,14 +109,14 @@ def chunk_pages(
     if not pages:
         return []
 
-    separators = "\n\n"
+    separator = "\n\n"
     offsets: list[tuple[int, int, int]] = []
     cursor = 0
     parts: list[str] = []
     for page_number, text in enumerate(pages, start=1):
         if parts:
-            parts.append(separators)
-            cursor += len(separators)
+            parts.append(separator)
+            cursor += len(separator)
         start = cursor
         parts.append(text)
         cursor += len(text)
@@ -194,6 +195,28 @@ def _slug(title: str) -> str:
     return value[:80] or "concept"
 
 
+def _concept_filenames(concepts: Sequence[CandidateConcept]) -> dict[str, str]:
+    """Create deterministic unique filenames even when distinct titles slugify identically."""
+    result: dict[str, str] = {}
+    used: set[str] = set()
+    for item in sorted(concepts, key=lambda candidate: candidate.title.casefold()):
+        key = _normalize_title(item.title)
+        base = _slug(item.title)
+        filename = f"{base}.md"
+        if filename.casefold() in used:
+            suffix = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+            filename = f"{base[:70]}-{suffix}.md"
+        counter = 2
+        candidate_filename = filename
+        while candidate_filename.casefold() in used:
+            candidate_filename = f"{filename[:-3]}-{counter}.md"
+            counter += 1
+        filename = candidate_filename
+        used.add(filename.casefold())
+        result[key] = filename
+    return result
+
+
 def merge_candidates(candidates: Iterable[CandidateConcept]) -> list[CandidateConcept]:
     merged: dict[str, CandidateConcept] = {}
     for candidate in candidates:
@@ -202,6 +225,11 @@ def merge_candidates(candidates: Iterable[CandidateConcept]) -> list[CandidateCo
         if current is None:
             merged[key] = candidate
             continue
+        if current.type.casefold() != candidate.type.casefold():
+            raise FoundryProtocolError(
+                f"duplicate concept title has conflicting types: {current.title}: "
+                f"{current.type!r} vs {candidate.type!r}"
+            )
         bodies = []
         for body in (current.body.strip(), candidate.body.strip()):
             if body and body not in bodies:
@@ -253,7 +281,7 @@ def write_candidate_bundle(
     meta_dir.mkdir()
 
     generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    title_to_file = {_normalize_title(item.title): f"{_slug(item.title)}.md" for item in concepts}
+    title_to_file = _concept_filenames(concepts)
 
     index_lines = [
         "---",
@@ -295,7 +323,16 @@ def write_candidate_bundle(
             },
             "status": "draft",
         }
-        lines = ["---", json.dumps(frontmatter, indent=2, sort_keys=True), "---", "", f"# {item.title}", "", item.body.strip(), ""]
+        lines = [
+            "---",
+            json.dumps(frontmatter, indent=2, sort_keys=True),
+            "---",
+            "",
+            f"# {item.title}",
+            "",
+            item.body.strip(),
+            "",
+        ]
         related = []
         for title in item.related_titles:
             target = title_to_file.get(_normalize_title(title))
@@ -307,7 +344,11 @@ def write_candidate_bundle(
             lines.append("")
         lines += ["## Source evidence", ""]
         for span in item.sources:
-            pages = str(span.start_page) if span.start_page == span.end_page else f"{span.start_page}-{span.end_page}"
+            pages = (
+                str(span.start_page)
+                if span.start_page == span.end_page
+                else f"{span.start_page}-{span.end_page}"
+            )
             lines.append(f"- `{span.path}` pages {pages} — `{span.resource}`")
         lines.append("")
         (concepts_dir / filename).write_text("\n".join(lines), encoding="utf-8")
@@ -344,16 +385,49 @@ def validate_okf_bundle(bundle_dir: str | Path) -> dict[str, Any]:
         except ValueError as exc:
             errors.append(str(exc))
 
-    for path in sorted((root / "concepts").glob("*.md")) if (root / "concepts").is_dir() else []:
+    concept_dir = root / "concepts"
+    for path in sorted(concept_dir.glob("*.md")) if concept_dir.is_dir() else []:
         concept_count += 1
         try:
             meta = _frontmatter(path.read_text(encoding="utf-8"), path)
-            if not isinstance(meta.get("type"), str) or not meta["type"].strip():
-                errors.append(f"concept has no non-empty type: {path.relative_to(root)}")
+            required_text = ("type", "title", "description")
+            for field in required_text:
+                if not isinstance(meta.get(field), str) or not meta[field].strip():
+                    errors.append(
+                        f"concept has no non-empty {field}: {path.relative_to(root)}"
+                    )
             if meta.get("status") != "draft":
                 errors.append(f"generated concept is not draft: {path.relative_to(root)}")
             if "verified" in meta:
                 errors.append(f"generated concept must not self-verify: {path.relative_to(root)}")
+            generated = meta.get("generated")
+            if not isinstance(generated, dict) or not isinstance(generated.get("by"), str):
+                errors.append(f"concept lacks generation provenance: {path.relative_to(root)}")
+            sources = meta.get("sources")
+            if not isinstance(sources, list) or not sources:
+                errors.append(f"concept lacks source provenance: {path.relative_to(root)}")
+            else:
+                for source in sources:
+                    if not isinstance(source, dict) or not re.fullmatch(
+                        r"urn:sha256:[0-9a-f]{64}", str(source.get("resource", ""))
+                    ):
+                        errors.append(f"concept has invalid source resource: {path.relative_to(root)}")
+                        continue
+                    erasmus = source.get("erasmus")
+                    if not isinstance(erasmus, dict):
+                        errors.append(f"concept lacks source span metadata: {path.relative_to(root)}")
+                        continue
+                    start_page = erasmus.get("start_page")
+                    end_page = erasmus.get("end_page")
+                    if (
+                        not isinstance(erasmus.get("source_path"), str)
+                        or not erasmus["source_path"]
+                        or not isinstance(start_page, int)
+                        or not isinstance(end_page, int)
+                        or start_page < 1
+                        or end_page < start_page
+                    ):
+                        errors.append(f"concept has invalid source span: {path.relative_to(root)}")
         except ValueError as exc:
             errors.append(str(exc))
 
@@ -423,6 +497,32 @@ def _semantic_candidates(
     ]
 
 
+def _publish_staging(staging: Path, output: Path, *, overwrite: bool) -> None:
+    backup: Path | None = None
+    try:
+        if output.exists():
+            if not overwrite:
+                raise FileExistsError(output)
+            backup = output.parent / f".{output.name}.foundry-backup-{uuid.uuid4().hex}"
+            output.replace(backup)
+        staging.replace(output)
+    except Exception:
+        if backup is not None and backup.exists() and not output.exists():
+            backup.replace(output)
+        raise
+    finally:
+        if staging.exists():
+            if staging.is_dir():
+                shutil.rmtree(staging)
+            else:
+                staging.unlink()
+        if backup is not None and backup.exists():
+            if backup.is_dir():
+                shutil.rmtree(backup)
+            else:
+                backup.unlink()
+
+
 def build_candidate_bundle(
     source_dir: str | Path,
     output_dir: str | Path,
@@ -434,14 +534,11 @@ def build_candidate_bundle(
     overwrite: bool = False,
 ) -> dict[str, Any]:
     source_root = Path(source_dir).resolve()
-    output = Path(output_dir)
-    if output.exists():
-        if not overwrite:
-            raise FileExistsError(output)
-        if output.is_dir():
-            shutil.rmtree(output)
-        else:
-            output.unlink()
+    output = Path(output_dir).resolve()
+    if source_root == output or output in source_root.parents:
+        raise ValueError("output directory must not contain the source directory")
+    if output.exists() and not overwrite:
+        raise FileExistsError(output)
 
     pdfs = discover_pdfs(source_root)
     if not pdfs:
@@ -482,14 +579,27 @@ def build_candidate_bundle(
     merged = merge_candidates(candidates)
     if not merged:
         raise ValueError("no candidate concepts were produced from extractable PDF text")
-    write_candidate_bundle(
-        output,
-        merged,
-        source_manifest,
-        runtime.config.model,
-        runtime.config.runtime_kind,
-    )
-    report = validate_okf_bundle(output)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging = output.parent / f".{output.name}.foundry-staging-{uuid.uuid4().hex}"
+    try:
+        write_candidate_bundle(
+            staging,
+            merged,
+            source_manifest,
+            runtime.config.model,
+            runtime.config.runtime_kind,
+        )
+        report = validate_okf_bundle(staging)
+        if not report["valid"]:
+            raise ValueError(
+                "generated OKF bundle failed validation: " + "; ".join(report["errors"])
+            )
+        _publish_staging(staging, output, overwrite=overwrite)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
     report.update(
         {
             "source_count": len(source_manifest),
@@ -497,6 +607,4 @@ def build_candidate_bundle(
             "output": str(output),
         }
     )
-    if not report["valid"]:
-        raise ValueError("generated OKF bundle failed validation: " + "; ".join(report["errors"]))
     return report

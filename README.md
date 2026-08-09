@@ -12,6 +12,7 @@ The system combines bounded conversational continuity, deterministic-first capab
 - **Skills and LoRA** preserve validated adaptive intelligence.
 - **10th-Man immunity** detects divergence and prevents shared hallucination.
 - **Mission engine** converts cognition into bounded execution.
+- **OKF Knowledge Foundry** converts PDF source folders into provenance-bearing draft OKF v0.2 candidate bundles without promoting them into canonical knowledge.
 
 ## OpenCode Erasmus layer
 
@@ -57,6 +58,8 @@ The installer does not copy project `opencode.json`, choose a provider/model, or
 - `erasmus runtime-discover configs/local-runtime.example.json` — list models and advertised capabilities
 - `erasmus runtime-smoke configs/local-runtime.example.json --prompt "hello"` — run one bounded, provenance-aware local session
 - `erasmus runtime-embed configs/local-runtime.example.json "text"` — request embeddings when advertised
+- `erasmus-foundry build <pdf-folder> <candidate-bundle> <runtime-config>` — synthesize a validated draft OKF v0.2 bundle from PDFs
+- `erasmus-foundry validate <candidate-bundle> --write-report` — deterministically validate a foundry output bundle
 - `erasmus ledger-evidence-add ...` — append provenance-bearing evidence
 - `erasmus ledger-propose ...` / `ledger-transition ...` — make explicit belief changes
 - `erasmus ledger-inspect <id>` / `ledger-query <id>` — inspect history and evidence
@@ -68,6 +71,8 @@ The installer does not copy project `opencode.json`, choose a provider/model, or
 - `erasmus backup <dest>` — hot-backup the database to a file
 - `erasmus restore <src>` — restore from a backup file
 - `erasmus review --proposition "..."`
+
+The foundry deliberately stops at **draft candidates**: it does not write ledger propositions, verify concepts, reconcile contradictions, build indexes, or silently grant authority. See [`docs/architecture/okf-knowledge-foundry.md`](docs/architecture/okf-knowledge-foundry.md).
 
 See [`docs/runbook-windows.md`](docs/runbook-windows.md) for PowerShell verification commands.
 

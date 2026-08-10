@@ -34,6 +34,7 @@ flowchart TD
     P7[P3.7 Concept revision and relationship store]
     P8[P3.8 Review and lifecycle gates]
     P8A[P3.8A Open questions and governed synthesis]
+    P8B[P3.8B Minimum invalidation and serving suspension]
     P9[P3.9 Deterministic OKF snapshot publication]
     P10[P3.10 Lexical retrieval and context packets]
     P11[P3.11 Vector and graph projections]
@@ -41,7 +42,7 @@ flowchart TD
     P13[P3.13 Continuous candidate intake and knowledge maintenance]
     P14[P3.14 Routing/world-model integration]
 
-    P0 --> P0A --> P1 --> P2 --> P3 --> P3A --> P4 --> P5 --> P6 --> P7 --> P8 --> P8A --> P9 --> P10 --> P11 --> P12 --> P13 --> P14
+    P0 --> P0A --> P1 --> P2 --> P3 --> P3A --> P4 --> P5 --> P6 --> P7 --> P8 --> P8A --> P8B --> P9 --> P10 --> P11 --> P12 --> P13 --> P14
 ```
 
 ## 2. P3.0 — Design and contract freeze
@@ -359,7 +360,7 @@ Ledger propositions are atomic beliefs but do not provide stable semantic concep
 
 ### Concrete failure solved
 
-Concept revisions exist but cannot move through independent review, validation, contestation, or canonical readiness under explicit policy.
+Concept revisions exist but cannot move through independent review, validation, contestation, or publication readiness under explicit policy.
 
 ### Scope
 
@@ -380,7 +381,7 @@ Observation-only review reports first; lifecycle mutation enabled only after fix
 - changed digest invalidates prior review;
 - consequential validation requires human/10th-Man as policy declares;
 - open contradictions surface in concept previews;
-- no direct `provisional -> canonical` path exists;
+- no lifecycle transition substitutes for per-channel snapshot publication;
 - rejected reviews remain visible.
 
 ## 10A. P3.8A — Open questions and governed synthesis
@@ -398,11 +399,11 @@ The design requires explicit open questions, hypotheses, evidence gaps, research
 - require every material synthesis statement to map to exact input claims or be labeled interpretation;
 - reject unsupported bridge claims into the normal candidate pipeline;
 - preserve contradiction, stale, scope, applicability, and omitted-material notices;
-- allow canonical synthesis only through the normal review/publication gates.
+- allow synthesis in a current channel snapshot only through the normal review/publication gates.
 
 ### Rollout
 
-Begin observation-only: record questions and provisional syntheses without exposing them in canonical retrieval. Enable reviewed/validated transitions only after grounding and closure fixtures pass.
+Begin observation-only: record questions and provisional syntheses without exposing them in current published retrieval. Enable reviewed/validated transitions only after grounding and closure fixtures pass.
 
 ### Acceptance
 
@@ -414,6 +415,33 @@ Begin observation-only: record questions and provisional syntheses without expos
 - material opposing evidence cannot be omitted from consequential synthesis;
 - unsupported bridge claims are quarantined as new candidates;
 - rollback removes only additive question/synthesis records or restores the pre-migration backup.
+
+## 10B. P3.8B — Minimum invalidation and serving suspension
+
+### Concrete failure solved
+
+The first current publication or retrieval path would otherwise have no immediate fail-closed way to stop unsafe, withdrawn, secret-bearing, or integrity-failed content before a replacement snapshot exists.
+
+### Scope
+
+- implement the minimum append-only `InvalidationEvent` and `ServingDirective` contracts;
+- support `qualify`, `exclude`, `block`, and `channel_suspend` before publication selection, cache, text materialization, or model context;
+- require exact subject/channel/scope, policy evaluation, evidence, authority, and global `event_seq`;
+- implement append-only directive replacement/retirement through `supersedes_directive_id`, including an authorized `allow` successor;
+- resolve one acyclic active directive leaf per subject/channel/scope and fail closed on conflicts or unavailable directive state;
+- provide inspect, apply, supersede, suspend, and recovery commands without broad impact traversal.
+
+This increment is a hard prerequisite to the first current pointer activation in P3.9 and every serving path in P3.10. The full downstream impact analysis, authoritative dependency traversal, knowledge-use notifications, and scheduled revalidation remain in P3.12.
+
+### Acceptance
+
+- directive resolution failure blocks current publication selection and retrieval;
+- source withdrawal, protected stop, secret discovery, and snapshot-integrity failure can block or suspend immediately;
+- directives apply before pointer selection, cache identity, content materialization, and model context;
+- replacement/retirement links are required, acyclic, same-scope, and globally ordered by `event_seq`;
+- concurrent active leaves fail closed;
+- no directive changes ledger truth, internal lifecycle, or immutable snapshot bytes;
+- rollback disables the serving path before removing additive inactive records or restores the pre-migration backup.
 
 ## 11. P3.9 — Deterministic canonical OKF snapshot publication
 
@@ -429,8 +457,9 @@ Validated concept state cannot yet be distributed as an immutable portable OKF c
 - aliases/redirect handling;
 - secret/privacy, source, link, and conformance validators;
 - double-render determinism check;
-- atomic snapshot directory/current-pointer protocol;
+- receipt-first crash-consistent snapshot directory/current-pointer protocol;
 - publication/withdraw/rollback commands.
+- enforce the completed P3.8B directive gate before any pointer selection.
 
 ### Rollout
 
@@ -444,6 +473,7 @@ Publish to an isolated non-current preview root. Promote `current` pointer behav
 - consequential/public publication gates enforced;
 - prior snapshot rollback verified;
 - direct filesystem edits are rejected or imported as candidates;
+- current activation fails closed when the active directive set cannot be resolved;
 - OKF v0.2 conformance and internal links pass.
 
 ## 12. P3.10 — Lexical retrieval and evidence packets
@@ -463,6 +493,7 @@ Published knowledge exists but cannot be retrieved through a governed, bounded, 
 - `KnowledgeUseReceipt` records for packets and material mission/decision use;
 - retrieval receipts and quality fixtures;
 - deterministic fallback by direct snapshot scan within budget.
+- require the completed P3.8B directive gate before any current-channel evidence is served.
 
 ### Acceptance
 

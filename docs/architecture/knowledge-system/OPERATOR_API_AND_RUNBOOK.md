@@ -97,7 +97,7 @@ Failure envelope:
 }
 ```
 
-The response never reports success when required work remains incomplete.
+Every response requires the `failure` field. It is exactly `null` when `ok` is true and the complete typed failure object when `ok` is false; omission, null-on-failure, or a partial object is a contract error. The response never reports success when required work remains incomplete.
 
 ## 3. CLI design
 
@@ -196,7 +196,7 @@ erasmus knowledge synthesis inspect <synthesis-id>
 erasmus knowledge synthesis review <synthesis-id> --review <review.json> ...
 ```
 
-A synthesis command writes `provisional` output only. It cannot close a question or become canonical without separate decisions.
+A synthesis command writes `provisional` output only. It cannot close a question or enter a current channel snapshot without separate review and publication decisions.
 
 ### 3.7 Review and lifecycle commands
 
@@ -237,7 +237,9 @@ erasmus knowledge publish rollback --channel <id> --to <snapshot-id> ...
 erasmus knowledge publish withdraw <snapshot-id> --reason "..." ...
 ```
 
-`publish apply` accepts an exact approved plan digest. It will not regenerate an open-ended plan during the side effect.
+`publish apply` accepts an exact approved plan digest and creates `intent_kind = new_snapshot`; it will not regenerate an open-ended plan during the side effect. `publish rollback` creates `intent_kind = reselect_existing` with `selection_kind = rollback`: it verifies the target's original materialization receipt and bytes, creates a new reselection receipt, and never renders, reinstalls, or duplicates snapshot/member rows. Explicit reselection uses the same branch with `selection_kind = reselect`.
+
+Every command reports the three independent machine counters: intent `attempt_sequence`, artifact `snapshot_sequence`, and selected `pointer_generation`. A new channel is non-serving with no pointer/selection and logical generation 0. Its first intent has attempt 1, `expected_prior_pointer_payload = null`, and `expected_prior_pointer_generation = 0`; after the success receipt declares next generation 1, activation compare-and-swaps the absent pointer. Later commands compare a generation-free exact prior payload plus its separate expected generation. SQLite and filesystem operations are ordered and recoverable, never claimed atomic together.
 
 ### 3.10 Projection and retrieval commands
 
@@ -549,7 +551,7 @@ erasmus knowledge publish apply `
 
 ```powershell
 erasmus knowledge recover --inspect --format json > recovery-plan.json
-# Review the exact current pointer, receipts, and suggested deterministic action.
+# Review event_seq, intent attempt_sequence, immutable snapshot_sequence, exact pointer_generation, receipts, and the deterministic recovery-table action.
 erasmus knowledge recover --apply recovery-plan.json `
   --mission 131 `
   --actor human:governor `
@@ -638,8 +640,18 @@ A CLI built against a newer service may use only operations whose request/respon
 | Revision conflict | No retry with stale input | Re-read current revision and create a new command |
 | Policy denied | No mutation | Obtain policy-compliant mission/approval or stop |
 | Projection corrupted | Mark failed/stale; fall back if permitted | Rebuild from verified snapshot |
-| Publication validation failure | Snapshot remains non-current | Inspect receipt and repair inputs/renderer |
-| Crash after pointer swap | Enter recovery-required | Apply deterministic pointer/receipt recovery plan |
+| Publication validation failure | Append a terminal typed failure receipt; no selection; append `failed` only if a snapshot row exists | Inspect receipt and repair inputs/renderer |
+| Bootstrap intent/artifact exists without receipt | Remain non-serving with absent pointer/generation 0 | Resume the exact first intent or append its failure receipt; never invent a snapshot event or prior pointer |
+| Bootstrap receipt exists without pointer | Remain non-serving | Activate only while pointer is absent, generation is 0, no selection/superseding intent exists, and authority/directives still pass |
+| Bootstrap generation-1 pointer exists without selection event | Verify exact receipt/payload; append selection idempotently | Inspect the first intent/receipt and all three counters |
+| Bootstrap pointer malformed with no confirmed selection | Remove/quarantine and remain non-serving, or complete from the receipt under generation-0 preconditions | Never infer or restore a prior pointer |
+| Crash before final directory install | Keep prior receipted pointer | Resume the exact intent or append a failure receipt; append `failed` only if its snapshot row exists |
+| Final directory exists without success receipt | Keep prior receipted pointer | Verify exact bytes and resume receipt commit, or append a failure receipt and retain the orphan by policy |
+| Crash after receipt commit before pointer replace | Keep prior receipted pointer | Resume only if prior generation/directives still match; otherwise append abort |
+| Crash after safe pointer replace before selection event | Verify receipt/manifest/generation; append missing event idempotently | Inspect recovery receipt; no unreceipted content is served |
+| Missing/malformed/unreceipted pointer after an existing confirmed selection | Reject serving and reconstruct only the last confirmed receipted pointer | Inspect tamper/integrity finding and recovery event; never infer from timestamps |
+| Rollback/reselection target missing or corrupt | Keep current pointer; append `rollback_unavailable` failure receipt | Restore target bytes only from verified backup or choose another receipted snapshot; do not create a duplicate snapshot wrapper |
+| Selection references a failure receipt | Reject the write through the receipt-status FK; pointer remains unchanged | Inspect the failed intent; only a new successful attempt can select |
 | Source removed | Mark unavailable; impact analysis | Revalidate, redact, withdraw, or replace |
 | Disk full | Stop at safe checkpoint | Free space and resume exact job |
 | Secret detected | Block publication | Redact/declassify through protected review |

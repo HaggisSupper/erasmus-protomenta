@@ -32,6 +32,7 @@ Open questions and synthesis are first-class knowledge records, but neither repl
   "required_tests": [],
   "exclusions": [],
   "created_by": "Actor",
+  "event_seq": 21,
   "created_at": "ISO-8601",
   "target_date": null,
   "mission_id": null
@@ -168,6 +169,7 @@ A synthesis is an immutable derived artifact explaining or organizing governed r
   "producer_profile": "...",
   "content_digest": {},
   "status": "provisional",
+  "event_seq": 22,
   "created_at": "ISO-8601"
 }
 ```
@@ -178,11 +180,10 @@ A synthesis is an immutable derived artifact explaining or organizing governed r
 - `reviewed` — exact input and output digests independently reviewed;
 - `validated` — grounding, contradiction, coverage, scope, and policy checks pass;
 - `contested` — synthesis framing or selection is materially disputed;
-- `canonical` — included in the current OKF snapshot as part of a concept revision;
 - `superseded` — replaced by a later synthesis;
 - `rejected` — unsupported, misleading, unsafe, or out of scope.
 
-The synthesis lifecycle aligns with concept publication lifecycle but remains a distinct record because multiple syntheses may exist for one claim set.
+The synthesis lifecycle aligns with internal concept review readiness but remains a distinct record because multiple syntheses may exist for one claim set. Channel publication is derived from snapshot membership and never mutates synthesis state.
 
 ## 7. Synthesis invariants
 
@@ -194,7 +195,7 @@ The synthesis lifecycle aligns with concept publication lifecycle but remains a 
 6. Producer and sole verifier are independent.
 7. Input snapshot/revision IDs are fixed.
 8. A change to any material input invalidates prior validation for current publication.
-9. `canonical` synthesis content is rendered deterministically from an approved synthesis record.
+9. Published synthesis content is rendered deterministically from a validated synthesis record into an exact channel snapshot.
 10. A synthesis cannot grant mission, capability, tool, skill, policy, or publication authority.
 
 ## 8. Grounding and coverage validation
@@ -266,11 +267,12 @@ Recommendations must distinguish factual claims, inference, value judgment, and 
 
 ## 11. Open-question and synthesis persistence
 
-Target tables:
+Target tables follow the global event contract in the storage specification: every authoritative question, transition, synthesis, and synthesis-transition row has a required unique `event_seq` foreign key inserted with its `knowledge_events` row in the same transaction.
 
 ```sql
 CREATE TABLE knowledge_open_questions (
     question_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     question TEXT NOT NULL,
     scope_json TEXT NOT NULL,
     risk_class TEXT NOT NULL,
@@ -288,6 +290,7 @@ CREATE TABLE knowledge_open_questions (
 
 CREATE TABLE knowledge_question_transitions (
     transition_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     question_id TEXT NOT NULL,
     prior_state TEXT,
     new_state TEXT NOT NULL,
@@ -305,6 +308,7 @@ CREATE TABLE knowledge_question_transitions (
 
 CREATE TABLE knowledge_syntheses (
     synthesis_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     synthesis_type TEXT NOT NULL,
     title TEXT NOT NULL,
     scope_json TEXT NOT NULL,
@@ -324,6 +328,7 @@ CREATE TABLE knowledge_syntheses (
 
 CREATE TABLE knowledge_synthesis_transitions (
     transition_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     synthesis_id TEXT NOT NULL,
     prior_state TEXT,
     new_state TEXT NOT NULL,
@@ -361,7 +366,7 @@ Open questions may be published when useful, but publication does not authorize 
 
 ### 12.2 Synthesis in a concept
 
-A canonical concept revision may reference a validated synthesis ID in its `erasmus` extension. The synthesis content becomes body text only through deterministic rendering. Claim footnotes and statuses remain present.
+A concept revision included in a receipted channel snapshot may reference a validated synthesis ID in its `erasmus` extension. The synthesis content becomes body text only through deterministic rendering. Claim footnotes and statuses remain present.
 
 ## 13. Retrieval behavior
 
@@ -382,7 +387,7 @@ Synthesis retrieval returns:
 - contested/stale flags;
 - source references.
 
-Canonical-only requests exclude provisional syntheses unless explicitly requested.
+Published-current requests use only synthesis content included in the selected channel's receipted current snapshot; internal lifecycle is not channel authorization. Provisional syntheses remain available only through authorized review modes.
 
 ## 14. Relationship to sleep and lessons
 

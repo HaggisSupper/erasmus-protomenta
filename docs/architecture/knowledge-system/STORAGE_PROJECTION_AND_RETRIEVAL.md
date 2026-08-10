@@ -40,11 +40,33 @@ This decision is recorded in [`../../adr/ADR-KNOWLEDGE-001-authoritative-state-a
 
 The exact migration is deferred. The target record families below are normative for responsibility and relationships. Names may change only through a documented contract revision.
 
+### 3.0 Global authoritative event order
+
+Every authoritative Phase 3 append uses one global SQLite event sequence. The event row and its domain row are inserted in the same SQLite transaction; a committed domain row without its event is invalid.
+
+```sql
+CREATE TABLE knowledge_events (
+    event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    event_type TEXT NOT NULL,
+    aggregate_type TEXT NOT NULL,
+    aggregate_id TEXT NOT NULL,
+    command_id TEXT,
+    transaction_id TEXT NOT NULL,
+    payload_digest_json TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    committed_at TEXT NOT NULL
+);
+```
+
+Every authoritative table in this design explicitly includes `event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq)`. SQLite single-writer serialization and `AUTOINCREMENT` provide one total order of committed Phase 3 events. Per-channel snapshot sequence, registry sequence, timestamps, and file modification times are domain facts, never substitutes for `event_seq`. Mutable ingestion checkpoints and outbox delivery rows are operational coordination, not authoritative history; their emitted domain records carry the event reference.
+
 ### 3.1 Source tables
 
 ```sql
 CREATE TABLE knowledge_sources (
     source_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     sha256 TEXT NOT NULL UNIQUE,
     media_type TEXT NOT NULL,
     byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
@@ -59,6 +81,7 @@ CREATE TABLE knowledge_sources (
 
 CREATE TABLE knowledge_extraction_receipts (
     receipt_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     source_id TEXT NOT NULL,
     extractor_json TEXT NOT NULL,
     options_json TEXT NOT NULL,
@@ -72,6 +95,7 @@ CREATE TABLE knowledge_extraction_receipts (
 
 CREATE TABLE knowledge_source_spans (
     span_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     source_id TEXT NOT NULL,
     coordinate_json TEXT NOT NULL,
     text_digest_json TEXT NOT NULL,
@@ -108,6 +132,7 @@ CREATE TABLE knowledge_ingestion_runs (
 
 CREATE TABLE knowledge_candidates (
     candidate_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     run_id TEXT NOT NULL,
     producer TEXT NOT NULL,
     content_digest_json TEXT NOT NULL,
@@ -125,6 +150,7 @@ CREATE TABLE knowledge_candidates (
 
 CREATE TABLE knowledge_candidate_claims (
     candidate_claim_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     candidate_id TEXT NOT NULL,
     statement TEXT NOT NULL,
     statement_digest TEXT NOT NULL,
@@ -141,6 +167,7 @@ CREATE TABLE knowledge_candidate_claims (
 
 CREATE TABLE knowledge_candidate_transitions (
     transition_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     candidate_id TEXT NOT NULL,
     prior_state TEXT,
     new_state TEXT NOT NULL,
@@ -160,6 +187,7 @@ Initial candidate content is immutable. Current disposition is derived from the 
 ```sql
 CREATE TABLE knowledge_comparison_targets (
     comparison_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     candidate_claim_id TEXT NOT NULL,
     target_id TEXT NOT NULL,
     target_kind TEXT NOT NULL,
@@ -174,6 +202,7 @@ CREATE TABLE knowledge_comparison_targets (
 
 CREATE TABLE knowledge_reconciliation_proposals (
     proposal_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     candidate_claim_id TEXT NOT NULL,
     proposed_action TEXT NOT NULL,
     target_ids_json TEXT NOT NULL,
@@ -189,6 +218,7 @@ CREATE TABLE knowledge_reconciliation_proposals (
 
 CREATE TABLE knowledge_reconciliation_decisions (
     decision_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     proposal_id TEXT NOT NULL,
     action TEXT NOT NULL,
     candidate_claim_id TEXT NOT NULL,
@@ -215,6 +245,7 @@ Decisions are append-only. A corrected decision is a new decision that supersede
 ```sql
 CREATE TABLE knowledge_concepts (
     concept_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL,
     scope_json TEXT NOT NULL,
@@ -223,6 +254,7 @@ CREATE TABLE knowledge_concepts (
 
 CREATE TABLE knowledge_concept_revisions (
     revision_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     concept_id TEXT NOT NULL,
     revision_number INTEGER NOT NULL CHECK(revision_number > 0),
     parent_revision_id TEXT,
@@ -247,6 +279,7 @@ CREATE TABLE knowledge_concept_revisions (
 
 CREATE TABLE knowledge_claim_bindings (
     claim_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     proposition_id INTEGER NOT NULL,
     binding_decision_id TEXT NOT NULL,
     statement_digest TEXT NOT NULL,
@@ -259,6 +292,7 @@ CREATE TABLE knowledge_claim_bindings (
 
 CREATE TABLE knowledge_relationships (
     relationship_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     from_id TEXT NOT NULL,
     relationship_type TEXT NOT NULL,
     to_id TEXT NOT NULL,
@@ -280,6 +314,7 @@ A separate append-only lifecycle-transition table stores concept state changes. 
 ```sql
 CREATE TABLE knowledge_reviews (
     review_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     review_type TEXT NOT NULL,
     subject_ids_json TEXT NOT NULL,
     reviewer TEXT NOT NULL,
@@ -295,6 +330,7 @@ CREATE TABLE knowledge_reviews (
 
 CREATE TABLE knowledge_lifecycle_transitions (
     transition_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     concept_id TEXT NOT NULL,
     revision_id TEXT NOT NULL,
     prior_state TEXT,
@@ -316,19 +352,69 @@ CREATE TABLE knowledge_lifecycle_transitions (
 ### 3.6 Publication tables
 
 ```sql
+CREATE TABLE knowledge_publication_intents (
+    intent_id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    attempt_sequence INTEGER NOT NULL,
+    intent_kind TEXT NOT NULL,
+    selection_kind TEXT NOT NULL,
+    target_snapshot_id TEXT NOT NULL,
+    snapshot_sequence INTEGER NOT NULL,
+    exact_plan_json TEXT,
+    expected_prior_pointer_payload_json TEXT,
+    expected_prior_pointer_generation INTEGER NOT NULL,
+    target_materialization_receipt_id TEXT,
+    event_seq INTEGER NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    UNIQUE(channel_id, attempt_sequence),
+    CHECK(
+        (expected_prior_pointer_payload_json IS NULL
+            AND expected_prior_pointer_generation = 0)
+        OR
+        (expected_prior_pointer_payload_json IS NOT NULL
+            AND expected_prior_pointer_generation >= 1)
+    ),
+    CHECK(
+        expected_prior_pointer_payload_json IS NULL
+        OR (json_valid(expected_prior_pointer_payload_json)
+            AND json_type(expected_prior_pointer_payload_json) = 'object'
+            AND json_type(
+                expected_prior_pointer_payload_json,
+                '$.pointer_generation'
+            ) IS NULL)
+    ),
+    CHECK(
+        (intent_kind = 'new_snapshot'
+            AND selection_kind = 'publish'
+            AND exact_plan_json IS NOT NULL
+            AND target_materialization_receipt_id IS NULL)
+        OR
+        (intent_kind = 'reselect_existing'
+            AND selection_kind IN ('rollback', 'reselect')
+            AND exact_plan_json IS NULL
+            AND target_materialization_receipt_id IS NOT NULL)
+    ),
+    FOREIGN KEY(event_seq) REFERENCES knowledge_events(event_seq),
+    FOREIGN KEY(target_materialization_receipt_id)
+        REFERENCES knowledge_publication_receipts(receipt_id)
+);
+
 CREATE TABLE knowledge_snapshots (
     snapshot_id TEXT PRIMARY KEY,
+    creating_intent_id TEXT NOT NULL UNIQUE,
     channel_id TEXT NOT NULL,
-    sequence INTEGER NOT NULL,
+    snapshot_sequence INTEGER NOT NULL,
     parent_snapshot_id TEXT,
     scope_json TEXT NOT NULL,
-    status TEXT NOT NULL,
-    manifest_digest_json TEXT,
+    manifest_digest_json TEXT NOT NULL,
     root_path TEXT NOT NULL,
+    event_seq INTEGER NOT NULL UNIQUE,
     created_at TEXT NOT NULL,
-    published_at TEXT,
-    withdrawn_at TEXT,
-    UNIQUE(channel_id, sequence),
+    UNIQUE(channel_id, snapshot_sequence),
+    UNIQUE(snapshot_id, snapshot_sequence),
+    FOREIGN KEY(creating_intent_id)
+        REFERENCES knowledge_publication_intents(intent_id),
+    FOREIGN KEY(event_seq) REFERENCES knowledge_events(event_seq),
     FOREIGN KEY(parent_snapshot_id)
         REFERENCES knowledge_snapshots(snapshot_id)
 );
@@ -339,28 +425,129 @@ CREATE TABLE knowledge_snapshot_members (
     revision_id TEXT NOT NULL,
     okf_path TEXT NOT NULL,
     document_digest_json TEXT NOT NULL,
+    event_seq INTEGER NOT NULL UNIQUE,
     PRIMARY KEY(snapshot_id, concept_id),
     UNIQUE(snapshot_id, okf_path),
+    FOREIGN KEY(event_seq) REFERENCES knowledge_events(event_seq),
     FOREIGN KEY(snapshot_id) REFERENCES knowledge_snapshots(snapshot_id),
     FOREIGN KEY(concept_id) REFERENCES knowledge_concepts(concept_id),
     FOREIGN KEY(revision_id)
         REFERENCES knowledge_concept_revisions(revision_id)
 );
 
+CREATE TABLE knowledge_snapshot_events (
+    snapshot_event_id TEXT PRIMARY KEY,
+    creating_intent_id TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    snapshot_sequence INTEGER NOT NULL,
+    channel_id TEXT NOT NULL,
+    prior_state TEXT,
+    new_state TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    event_seq INTEGER NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(creating_intent_id)
+        REFERENCES knowledge_publication_intents(intent_id),
+    FOREIGN KEY(snapshot_id) REFERENCES knowledge_snapshots(snapshot_id),
+    FOREIGN KEY(event_seq) REFERENCES knowledge_events(event_seq)
+);
+
 CREATE TABLE knowledge_publication_receipts (
     receipt_id TEXT PRIMARY KEY,
-    snapshot_id TEXT NOT NULL,
-    plan_json TEXT NOT NULL,
+    intent_id TEXT NOT NULL UNIQUE,
+    receipt_kind TEXT NOT NULL,
+    target_snapshot_id TEXT,
+    channel_id TEXT NOT NULL,
+    attempt_sequence INTEGER NOT NULL,
+    snapshot_sequence INTEGER,
+    expected_prior_pointer_generation INTEGER NOT NULL,
+    next_pointer_generation INTEGER,
     publisher_json TEXT NOT NULL,
     validator_json TEXT NOT NULL,
     results_json TEXT NOT NULL,
-    prior_pointer TEXT,
-    resulting_pointer TEXT,
-    status TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    manifest_digest_json TEXT,
+    pointer_payload_digest_json TEXT,
+    receipt_status TEXT NOT NULL,
     failure_json TEXT,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    FOREIGN KEY(snapshot_id) REFERENCES knowledge_snapshots(snapshot_id)
+    event_seq INTEGER NOT NULL UNIQUE,
+    completed_at TEXT NOT NULL,
+    CHECK(receipt_kind IN ('materialization', 'reselection')),
+    CHECK(receipt_status IN ('success', 'failure')),
+    CHECK(json_valid(publisher_json) AND json_type(publisher_json) = 'object'),
+    CHECK(json_valid(validator_json) AND json_type(validator_json) = 'object'),
+    CHECK(json_valid(results_json) AND json_type(results_json) = 'object'),
+    CHECK(json_valid(evidence_json) AND json_type(evidence_json) = 'object'),
+    CHECK(
+        (receipt_status = 'success'
+            AND target_snapshot_id IS NOT NULL
+            AND snapshot_sequence IS NOT NULL
+            AND next_pointer_generation IS NOT NULL
+            AND manifest_digest_json IS NOT NULL
+            AND pointer_payload_digest_json IS NOT NULL
+            AND failure_json IS NULL)
+        OR
+        (receipt_status = 'failure'
+            AND next_pointer_generation IS NULL
+            AND failure_json IS NOT NULL
+            AND json_valid(failure_json)
+            AND json_type(failure_json) = 'object'
+            AND json_type(failure_json, '$.code') = 'text'
+            AND json_type(failure_json, '$.message') = 'text'
+            AND json_type(failure_json, '$.details') = 'object'
+            AND json_type(failure_json, '$.retryable') IN ('true', 'false')
+            AND json_type(failure_json, '$.action') = 'text'
+            AND json_type(failure_json, '$.related_ids') = 'array'
+            AND ((target_snapshot_id IS NULL AND snapshot_sequence IS NULL)
+                OR (target_snapshot_id IS NOT NULL
+                    AND snapshot_sequence IS NOT NULL)))
+    ),
+    CHECK(
+        receipt_status = 'failure'
+        OR next_pointer_generation = expected_prior_pointer_generation + 1
+    ),
+    UNIQUE(receipt_id, receipt_status),
+    FOREIGN KEY(intent_id)
+        REFERENCES knowledge_publication_intents(intent_id),
+    FOREIGN KEY(target_snapshot_id, snapshot_sequence)
+        REFERENCES knowledge_snapshots(snapshot_id, snapshot_sequence),
+    FOREIGN KEY(event_seq) REFERENCES knowledge_events(event_seq)
+);
+
+CREATE TABLE knowledge_channel_selection_events (
+    selection_event_id TEXT PRIMARY KEY,
+    intent_id TEXT NOT NULL UNIQUE,
+    channel_id TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    publication_receipt_id TEXT NOT NULL,
+    publication_receipt_status TEXT NOT NULL,
+    prior_snapshot_id TEXT,
+    attempt_sequence INTEGER NOT NULL,
+    snapshot_sequence INTEGER NOT NULL,
+    prior_pointer_generation INTEGER NOT NULL,
+    pointer_generation INTEGER NOT NULL,
+    pointer_digest_json TEXT NOT NULL,
+    selection_kind TEXT NOT NULL,
+    event_seq INTEGER NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    UNIQUE(channel_id, pointer_generation),
+    CHECK(publication_receipt_status = 'success'),
+    CHECK(selection_kind IN ('publish', 'rollback', 'reselect')),
+    CHECK(pointer_generation = prior_pointer_generation + 1),
+    CHECK(
+        (prior_snapshot_id IS NULL
+            AND prior_pointer_generation = 0
+            AND pointer_generation = 1)
+        OR
+        (prior_snapshot_id IS NOT NULL
+            AND prior_pointer_generation >= 1)
+    ),
+    FOREIGN KEY(intent_id)
+        REFERENCES knowledge_publication_intents(intent_id),
+    FOREIGN KEY(snapshot_id) REFERENCES knowledge_snapshots(snapshot_id),
+    FOREIGN KEY(publication_receipt_id, publication_receipt_status)
+        REFERENCES knowledge_publication_receipts(receipt_id, receipt_status),
+    FOREIGN KEY(event_seq) REFERENCES knowledge_events(event_seq)
 );
 ```
 
@@ -369,6 +556,7 @@ CREATE TABLE knowledge_publication_receipts (
 ```sql
 CREATE TABLE knowledge_projection_manifests (
     projection_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     projection_kind TEXT NOT NULL,
     source_snapshot_id TEXT NOT NULL,
     builder_json TEXT NOT NULL,
@@ -383,6 +571,27 @@ CREATE TABLE knowledge_projection_manifests (
     completed_at TEXT,
     FOREIGN KEY(source_snapshot_id)
         REFERENCES knowledge_snapshots(snapshot_id)
+);
+
+CREATE TABLE knowledge_evidence_packets (
+    packet_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
+    request_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    snapshot_sequence INTEGER NOT NULL,
+    publication_receipt_id TEXT NOT NULL,
+    pointer_generation INTEGER NOT NULL,
+    directive_set_digest_json TEXT NOT NULL,
+    as_known_event_seq INTEGER NOT NULL,
+    packet_json TEXT NOT NULL,
+    packet_digest_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK(as_known_event_seq <= event_seq),
+    FOREIGN KEY(snapshot_id) REFERENCES knowledge_snapshots(snapshot_id),
+    FOREIGN KEY(publication_receipt_id)
+        REFERENCES knowledge_publication_receipts(receipt_id),
+    FOREIGN KEY(as_known_event_seq) REFERENCES knowledge_events(event_seq)
 );
 
 CREATE TABLE knowledge_outbox (
@@ -415,10 +624,11 @@ Consequential tables require no-update/no-delete triggers similar to the existin
 - relationships;
 - reviews;
 - lifecycle transitions;
-- snapshots and publication receipts;
+- publication intents, snapshots, snapshot members, snapshot events, publication receipts, and channel-selection events;
+- terminal projection manifests, immutable evidence-packet retrieval receipts, freshness assessments, and revalidation requests;
 - audit events.
 
-Mutable operational fields such as retry count, lease expiration, or outbox status belong in explicitly operational tables and are not evidence records.
+Every authoritative DDL row carrying `event_seq` is inserted once. Status fields in those records describe that immutable attempt or assessment; mutable retry count, lease expiration, ingestion checkpoint, and outbox delivery status belong in explicitly operational tables and are not evidence records.
 
 ## 5. Transaction boundaries
 
@@ -447,17 +657,45 @@ One transaction:
 
 If any step fails, no authoritative Phase 3 or ledger mutation commits.
 
-### 5.3 Publication transaction split
+### 5.3 Append-only publication protocol
 
-Filesystem publication cannot share a SQLite transaction. Use a prepare/commit protocol:
+Publication is serialized per channel. No filesystem operation and SQLite transaction are claimed to be atomic together. Artifact state is derived from append-only snapshot events ordered by `event_seq`; intent, artifact, member, receipt, and selection rows are never updated.
 
-1. **Prepare transaction:** create `building` snapshot, persist exact publication plan and rollback target.
-2. **Build outside transaction:** render temporary directory and compute receipts.
-3. **Validate outside transaction:** OKF, links, sources, privacy, secrets, deterministic rebuild.
-4. **Approve transaction:** append approval and mark snapshot `approved`.
-5. **Atomic filesystem swap:** move temporary directory to immutable snapshot path and atomically update `current` pointer.
-6. **Commit transaction:** persist success receipt and mark `published`.
-7. If step 6 fails after pointer swap, recovery compares pointer and receipt, then either completes the transaction or restores the prior pointer. It never guesses.
+Three counters are independent. `attempt_sequence` is consumed by every channel-local intent, including failed attempts and reselections. `snapshot_sequence` is allocated once when a new immutable artifact is created and never changes when that artifact is selected again. `pointer_generation` advances only when `current.json` is replaced. No counter is inferred from or compared to either other counter.
+
+A new channel has no `current.json`, no channel-selection event, logical pointer generation 0, and is non-serving. Only in that state may `expected_prior_pointer_payload = null` and `expected_prior_pointer_generation = 0`. For later attempts the payload contains the exact prior `current.json` fields except `pointer_generation`; the separate generation field is its sole authoritative generation value. The first intent has `attempt_sequence = 1`, `intent_kind = new_snapshot`, and `selection_kind = publish`. Under the per-channel lock, prepare verifies that no valid pointer or activated selection exists. The first activation must compare-and-swap the absent pointer at generation 0; its success receipt declares `next_pointer_generation = 1`.
+
+Every intent terminates with exactly one immutable receipt. A failure at any boundary before that terminal receipt, including before render, snapshot-row insertion, artifact creation, or digest calculation, immediately appends a typed failure receipt. Such a receipt records deterministic publisher, validator, results, and evidence data; has `failure_json` as an object; sets `next_pointer_generation` to null; and may set target snapshot, snapshot sequence, manifest digest, and pointer-payload digest to null. It never authorizes pointer selection. If no snapshot row exists, no snapshot event is appended; the intent remains the durable record of the proposed target and reserved snapshot sequence. After a success receipt exists, pointer/confirmation failures leave that receipt unselected and append recovery/abort evidence rather than attempting a second receipt.
+
+1. **Prepare intent (SQLite transaction)**: verify authority, policy, reviews, directives, the generation-free `expected_prior_pointer_payload`, separate `expected_prior_pointer_generation`, and intent kind. Insert one immutable intent. A `new_snapshot` intent carries an exact plan and a newly allocated `snapshot_sequence`; a `reselect_existing` intent carries no render plan and names the existing target's original verified materialization receipt. Do not insert digest-bearing snapshot/member rows before the digests exist.
+2. **Render and validate (filesystem work root)**: for `new_snapshot`, render the exact plan twice into disjoint temporary roots, compare bytes, and validate OKF, links, sources, scope, privacy, secrets, and manifest digest. For `reselect_existing`, do not render: verify the same-channel target snapshot, its original materialization receipt, manifest, immutable directory, current policy/directives, and authority. `work/` remains non-serving.
+3. **Approve snapshot (SQLite transaction)**: for `new_snapshot`, recheck the intent and expected pointer generation, then insert the immutable snapshot/member rows once and append `prepared`, `validated`, and `approved` artifact events using the exact verified digests. For `reselect_existing`, this step must not insert `knowledge_snapshots` or `knowledge_snapshot_members` and appends no artifact-state event.
+4. **Install snapshot directory (filesystem)**: for `new_snapshot`, fsync files/directories, atomically rename the approved root to its immutable final path on the same volume, fsync the parent, and verify final bytes. For `reselect_existing`, do not rename, install, or rewrite the existing directory. The expected prior pointer payload/generation—or bootstrap absence—remains current; this step performs no SQLite write.
+5. **Commit terminal success receipt (SQLite transaction)**: recheck the artifact and expected prior pointer generation. A new artifact appends `materialized` and commits a `materialization` receipt; rollback/reselection commits a new `reselection` receipt without changing artifact state. A success receipt requires the target snapshot ID, immutable `snapshot_sequence`, manifest digest, future pointer-payload digest, `failure = null`, and `next_pointer_generation = expected + 1`. It means eligible to select, not that the pointer already moved.
+6. **Activate current pointer (filesystem)**: under the same channel lock, compare the actual pointer to the intent's generation-free `expected_prior_pointer_payload` and separate `expected_prior_pointer_generation`. Write and fsync `current.json.tmp` containing `channel_id`, `snapshot_id`, `snapshot_sequence`, `receipt_id`, `intent_id`, `attempt_sequence`, `pointer_generation`, `manifest_digest`, and policy/registry profile IDs; atomically replace `current.json` and fsync the channel directory. Bootstrap compares absence/generation 0; later activation compares the exact prior payload/generation. The current pointer must never name a snapshot without its committed success receipt.
+7. **Confirm activation (SQLite transaction)**: verify the exact on-disk payload and append one channel-selection event with the same intent, success receipt, `attempt_sequence`, immutable `snapshot_sequence`, prior generation, new `pointer_generation`, and selection kind. The DDL's receipt-status foreign key rejects failure receipts. Selection confirmation is not a snapshot-state transition. This event and outbox work are idempotent by intent and channel generation.
+8. Clean temporary roots only after confirmation. Retain immutable failed/orphan artifacts according to policy. A `failed` snapshot event is appended only when its referenced snapshot row already exists; pre-snapshot failures terminate solely through the intent's failure receipt.
+
+At every read, the broker verifies each domain independently: pointer `snapshot_sequence` equals the target artifact and receipt, pointer `attempt_sequence` equals its intent/receipt, and pointer `pointer_generation` equals the receipt's `next_pointer_generation` and the confirmed selection event when present. It also verifies channel, manifest digest, policy/registry identities, directive set, and immutable bytes. A missing or mismatched receipt makes the pointer invalid and non-serving.
+
+Deterministic restart recovery uses the following state table and never timestamp order:
+
+| Durable state | Prior selection | Pointer state | Recovery |
+|---|---|---|---|
+| No intent or receipt | None (bootstrap) | Absent, logical generation 0 | Remain non-serving; a `new_snapshot` intent may begin with attempt 1. |
+| Intent exists; final directory absent | None (bootstrap) | Absent, logical generation 0 | Resume the exact intent or append its terminal failure receipt; append no snapshot event when no snapshot row exists. |
+| Final directory exists; success receipt absent | None (bootstrap) | Absent, logical generation 0 | Verify exact bytes and resume receipt commit, or append a terminal failure receipt, append `failed` only for an existing snapshot row, and retain the orphan by policy. |
+| Failed/aborted attempt receipt exists | None (bootstrap) | Absent, logical generation 0 | Remain non-serving. A later `new_snapshot` intent consumes the next `attempt_sequence` but still expects pointer absence/generation 0. |
+| Success receipt exists; pointer remains prior generation | None (bootstrap) | Absent, logical generation 0 | Activate only if absence/generation 0, authority, directives, and lack of a selection/superseding intent still hold; otherwise fail closed. |
+| Pointer names target receipt; selection event absent | None (bootstrap) | Safe receipted generation 1 | Verify the exact generation-1 receipt/payload, then idempotently append the selection event. |
+| Pointer is missing, malformed, unreceipted, or content-mismatched | None (bootstrap) | Invalid/non-serving | With no confirmed event, remove/quarantine it and either complete from the receipt under generation-0 preconditions or remain unselected. After a confirmed generation-1 event, reconstruct only its exact pointer from that event and receipt. Never restore a nonexistent prior pointer. |
+| Intent exists; final directory absent | Existing receipted selection | Exact prior generation | Resume a new-snapshot build, or verify the existing target for reselection; otherwise append a terminal failure receipt without inventing snapshot events. |
+| Final directory exists; success receipt absent | Existing receipted selection | Exact prior generation | Verify exact bytes and resume receipt commit, or append a terminal failure receipt, append `failed` only for an existing snapshot row, and retain any orphan by policy. |
+| Success receipt exists; pointer remains prior generation | Existing receipted selection | Exact prior generation | Complete activation only if the generation-free expected payload and separate generation still match and no superseding intent/directive blocks it; otherwise leave the success receipt unselected and append recovery/abort evidence, never a second receipt. |
+| Pointer names target receipt; selection event absent | Existing receipted selection | Safe receipted next generation | Verify receipt, manifest, and all three counters, then idempotently append the missing selection event. |
+| Pointer is missing, malformed, unreceipted, or content-mismatched | Existing confirmed selection | Invalid/non-serving | Reconstruct only the last confirmed receipted pointer from its selection event and receipt, then append recovery evidence; never infer a target from timestamps. |
+
+Rollback and explicit reselection use `intent_kind = reselect_existing`. They create a new intent, `reselection` receipt, and channel-selection event targeting an existing same-channel snapshot with an intact original materialization receipt. They do not reinsert snapshot/member rows, allocate a new `snapshot_sequence`, render, rename, or modify artifact bytes. They advance `attempt_sequence` and compare-and-swap a new `pointer_generation`. A missing/corrupt target is `rollback_unavailable` and fails closed. Example: publish S1 = `(snapshot_sequence=1, attempt_sequence=1, pointer_generation=1)`; publish S2 = `(2,2,2)`; rollback to S1 = `(1,3,3)`. The result is two snapshot rows and three intent/receipt/selection chains. Channel-selection kinds are only `publish`, `rollback`, and `reselect`; pointer repair that reconstructs an already confirmed generation records separate recovery evidence rather than inventing another selection.
 
 ## 6. Filesystem snapshot layout
 
@@ -480,7 +718,7 @@ state/
     │   │   │   │   ├── references/
     │   │   │   │   └── _erasmus/
     │   │   │   │       ├── snapshot-manifest.json
-    │   │   │   │       ├── publication-receipt.json
+    │   │   │   │       ├── publication-intent.json
     │   │   │   │       └── source-map.json
     │   │   │   └── 00000042-<snapshot-uuid>/
     │   │   └── projections/
@@ -503,14 +741,15 @@ Rules:
 
 - Snapshot directories are immutable after publication.
 - `work/` is never a retrieval source.
-- Each publication channel has an independent `current.json` containing channel ID, snapshot ID, sequence, manifest digest, policy/registry profile IDs, and update receipt ID.
+- Each publication channel has an independent `current.json` containing `channel_id`, `snapshot_id`, immutable `snapshot_sequence`, committed `receipt_id`, `intent_id`, `attempt_sequence`, monotonic `pointer_generation`, `manifest_digest`, and policy/registry profile IDs. It has no generic `sequence` field.
+- `current.json` is valid only when its exact success receipt already exists in SQLite and its attempt, snapshot, pointer generation, manifest, channel, and artifact checks agree independently.
 - Source storage paths derive from digest, never from untrusted filenames.
 - Snapshot roots and source roots are disjoint.
 - Published OKF source links use relative references only when the referenced artifact is intentionally included in the snapshot.
 
 ### 6.1 Publication channel isolation
 
-Snapshot sequence, current pointer, projection root, policy, scope, renderer, retention, redaction, and rollback are isolated per `PublicationChannel`. Publishing or rolling back one channel must not modify another. A retrieval request selects a channel explicitly or through deterministic policy before projection access.
+Snapshot-sequence allocation, attempt-sequence allocation, pointer generation, current pointer, projection root, policy, scope, renderer, retention, redaction, and rollback are isolated per `PublicationChannel`. Publishing or rolling back one channel must not modify another. A retrieval request selects a channel explicitly or through deterministic policy before projection access.
 
 The channel contract and activation rules are defined in [`POLICY_IDENTITY_AND_REGISTRIES.md`](POLICY_IDENTITY_AND_REGISTRIES.md).
 
@@ -548,7 +787,7 @@ okf_version: "0.2"
 erasmus:
   profile: erasmus.knowledge-bundle/v1
   snapshot_id: urn:erasmus:snapshot:...
-  sequence: 42
+  snapshot_sequence: 42
   manifest_digest: ...
   scope: project
 ---
@@ -662,7 +901,7 @@ flowchart LR
     L --> U
     V --> U
     G --> U
-    U --> F[Lifecycle/freshness/contradiction filter]
+    U --> F[Snapshot membership/freshness/contradiction filter]
     F --> R[Evidence-aware reranker]
     R --> B[Budgeted evidence packet]
     B --> C[Context broker]
@@ -707,15 +946,17 @@ Default strategy:
 Filter by:
 
 - authorized scope;
-- selected snapshot;
+- snapshot membership for the selected channel and verified receipted snapshot;
 - active serving directives;
-- concept lifecycle;
+- internal concept lifecycle only as an explicit quality/review constraint;
 - claim epistemic state;
 - source availability;
 - freshness policy;
 - temporal and applicability constraints;
 - contradiction policy;
 - risk class.
+
+Concept lifecycle is not a channel authorization filter. `canonical`/current inclusion is derived from `(channel_id, verified current snapshot_id, snapshot_members)`; a private channel may include a validated revision while a public channel omits it without changing internal lifecycle. Pinned historical reads use membership in the exact receipted historical snapshot and label `channel_publication_state` accordingly.
 
 ### 12.5 Reranking
 
@@ -760,6 +1001,10 @@ Budget priority:
 
 Truncation records omitted counts and reasons. It never silently drops the fact that a claim is contested or stale.
 
+### 12.8 Immutable retrieval receipt
+
+Every returned `EvidencePacket` is an authoritative immutable retrieval receipt, not a transient projection value. Its event row and `knowledge_evidence_packets` row commit in one SQLite transaction. The packet records the exact `channel_id`, `snapshot_id`, immutable `snapshot_sequence`, `publication_receipt_id`, `pointer_generation`, directive-set digest, and `as_known_event_seq` query boundary; `as_known_event_seq` must be less than or equal to the packet's own `event_seq`. Canonical packet JSON and its digest make later `KnowledgeUseReceipt` references reproducible. Packet timestamps describe retrieval time and never replace either event-sequence boundary.
+
 ## 13. Context broker integration
 
 The existing bounded-context assembler currently accepts retrieved evidence as `content` plus `source_ref`. Phase 3 should add a versioned adapter that renders `EvidencePacket` items into that existing section without weakening the instruction/data boundary.
@@ -786,6 +1031,7 @@ Target tables:
 ```sql
 CREATE TABLE knowledge_freshness_assessments (
     assessment_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     subject_id TEXT NOT NULL,
     source_signals_json TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -798,6 +1044,7 @@ CREATE TABLE knowledge_freshness_assessments (
 
 CREATE TABLE knowledge_revalidation_requests (
     request_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     subject_ids_json TEXT NOT NULL,
     reason TEXT NOT NULL,
     risk_class TEXT NOT NULL,
@@ -830,7 +1077,7 @@ Restore procedure:
 1. restore SQLite and run integrity check;
 2. verify source artifact digests;
 3. verify snapshot manifests and receipts;
-4. restore or select a published snapshot pointer;
+4. restore only a pointer whose exact success receipt, channel, generation, manifest, and immutable bytes verify;
 5. discard projection artifacts whose source snapshot/configuration does not match;
 6. rebuild projections;
 7. run retrieval and publication fixture checks;
@@ -880,7 +1127,7 @@ A promoted implementation must prove:
 3. Span identities and extraction receipts reproduce evidence.
 4. Reconciliation commits are atomic with ledger operations.
 5. Stale revision writes fail without partial state.
-6. Snapshot build and current-pointer swap recover correctly at every injected failure point.
+6. Receipt-first snapshot publication and current-pointer selection recover correctly at every injected failure point without claiming cross-resource atomicity.
 7. Identical plans render byte-identical snapshots.
 8. FTS/vector/graph projections rebuild from a snapshot without access to prior projection artifacts.
 9. A projection from the wrong snapshot is rejected.
@@ -888,3 +1135,5 @@ A promoted implementation must prove:
 11. Contested and stale flags survive retrieval and context rendering.
 12. Backup/restore reproduces the current snapshot and retrieval fixtures.
 13. Protected-source removal propagates through snapshots and projections without erasing audit metadata.
+14. Every authoritative append references the one global SQLite `event_seq`, and historical reconstruction never orders by timestamp.
+15. A current pointer without its exact committed success receipt is rejected and restored to the last verified receipted pointer.

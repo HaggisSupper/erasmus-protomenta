@@ -26,6 +26,10 @@
       "type": "string",
       "format": "date-time"
     },
+    "eventSequence": {
+      "type": "integer",
+      "minimum": 1
+    },
     "scope": {
       "type": "object",
       "required": ["visibility", "tenant", "labels"],
@@ -47,7 +51,8 @@
       "required": [
         "contract", "uncertainty_id", "subject_id", "kind",
         "representation", "method", "source_span_ids", "evidence_ids",
-        "scope", "applicability", "status", "created_by", "created_at"
+        "scope", "applicability", "status", "created_by", "event_seq",
+        "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.uncertainty/v1"},
@@ -80,6 +85,7 @@
         "applicability": {"type": "object"},
         "status": {"enum": ["current", "superseded", "invalidated"]},
         "created_by": {"$ref": "#/$defs/actor"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"},
         "supersedes_uncertainty_id": {
           "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
@@ -93,7 +99,7 @@
         "contract", "assessment_id", "subject_ids", "intended_use",
         "risk_class", "possible_effect", "reversibility", "detectability",
         "affected_channel_ids", "assessment", "evidence_ids",
-        "policy_evaluation_id", "actor", "created_at"
+        "policy_evaluation_id", "actor", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.materiality-assessment/v1"},
@@ -110,6 +116,7 @@
         "policy_evaluation_id": {"$ref": "#/$defs/stableId"},
         "actor": {"$ref": "#/$defs/actor"},
         "review_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -118,7 +125,7 @@
       "type": "object",
       "required": [
         "contract", "dependency_id", "from_id", "type", "to_id",
-        "materiality", "qualifiers", "evidence_ids", "created_at"
+        "materiality", "qualifiers", "evidence_ids", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.knowledge-dependency/v1"},
@@ -132,6 +139,7 @@
           "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
         },
         "evidence_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"},
         "supersedes_dependency_id": {
           "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
@@ -144,7 +152,8 @@
       "required": [
         "contract", "use_receipt_id", "evidence_packet_id", "channel_id",
         "snapshot_id", "claim_ids", "concept_revision_ids", "source_span_ids",
-        "serving_directive_ids", "usage_class", "materiality", "actor", "created_at"
+        "serving_directive_ids", "usage_class", "materiality", "actor",
+        "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.knowledge-use/v1"},
@@ -161,6 +170,7 @@
         "usage_class": {"enum": ["retrieved", "presented", "consulted", "cited", "material_to_decision", "rejected_by_decision"]},
         "materiality": {"enum": ["immaterial", "qualifying", "material", "critical", "unknown"]},
         "actor": {"$ref": "#/$defs/actor"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -171,7 +181,8 @@
         "contract", "invalidation_event_id", "trigger_kind", "affected_ids",
         "evidence_ids", "review_ids", "scope", "severity",
         "policy_evaluation_id", "actor", "authority",
-        "immediate_serving_requirement", "recovery_requirement", "created_at"
+        "immediate_serving_requirement", "recovery_requirement", "event_seq",
+        "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.invalidation-event/v1"},
@@ -188,6 +199,7 @@
         "mission_id": {"type": ["integer", "null"], "minimum": 1},
         "immediate_serving_requirement": {"enum": ["none", "qualify", "exclude", "block", "channel_suspend"]},
         "recovery_requirement": {"type": "object"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -198,7 +210,7 @@
         "contract", "impact_id", "invalidation_event_id", "root_subject_ids",
         "dependency_snapshot", "affected", "materiality_by_subject",
         "unresolved_dependencies", "recommended_directives",
-        "required_missions", "created_by", "created_at"
+        "required_missions", "created_by", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.impact-analysis/v1"},
@@ -212,6 +224,7 @@
         "recommended_directives": {"type": "array", "items": {"type": "object"}},
         "required_missions": {"type": "array", "items": {"type": "object"}},
         "created_by": {"$ref": "#/$defs/actor"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -222,7 +235,7 @@
         "contract", "directive_id", "subject_ids", "channel_ids",
         "scope_selector", "effect", "reason_code", "invalidation_event_id",
         "evidence_ids", "policy_evaluation_id", "actor", "authority",
-        "effective_at", "created_at"
+        "effective_at", "supersedes_directive_id", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.serving-directive/v1"},
@@ -249,6 +262,10 @@
         "replacement_snapshot_id": {
           "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
         },
+        "supersedes_directive_id": {
+          "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
+        },
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false

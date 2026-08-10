@@ -23,6 +23,10 @@
       "type": "string",
       "format": "date-time"
     },
+    "eventSequence": {
+      "type": "integer",
+      "minimum": 1
+    },
     "scope": {
       "type": "object",
       "required": ["visibility", "tenant", "labels"],
@@ -63,7 +67,7 @@
     "synthesisState": {
       "enum": [
         "provisional", "reviewed", "validated", "contested",
-        "canonical", "superseded", "rejected"
+        "superseded", "rejected"
       ]
     },
     "openQuestion": {
@@ -72,7 +76,7 @@
         "contract", "question_id", "question", "scope", "risk_class",
         "related_concept_ids", "related_claim_ids", "contradiction_set_ids",
         "hypothesis_claim_ids", "required_evidence", "required_tests",
-        "exclusions", "created_by", "created_at"
+        "exclusions", "created_by", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.open-question/v1"},
@@ -104,6 +108,7 @@
         "required_tests": {"type": "array", "items": {"type": "object"}},
         "exclusions": {"type": "array", "items": {"type": "string"}},
         "created_by": {"$ref": "#/$defs/actor"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"},
         "target_date": {"type": ["string", "null"], "format": "date"}
       },
@@ -114,7 +119,7 @@
       "required": [
         "contract", "transition_id", "question_id", "new_state",
         "evidence_ids", "answer_claim_ids", "actor", "authority",
-        "policy_version", "reason", "created_at"
+        "policy_version", "reason", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.open-question-transition/v1"},
@@ -142,6 +147,7 @@
         "mission_id": {"type": ["integer", "null"], "minimum": 1},
         "policy_version": {"type": "string", "minLength": 1},
         "reason": {"type": "string", "minLength": 1},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -153,7 +159,7 @@
         "risk_class", "input_claim_ids", "input_concept_revision_ids",
         "input_contradiction_set_ids", "input_source_span_ids",
         "input_snapshot_id", "content", "omitted_material", "producer",
-        "producer_profile", "content_digest", "created_at"
+        "producer_profile", "content_digest", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.synthesis/v1"},
@@ -194,6 +200,7 @@
         "producer": {"$ref": "#/$defs/actor"},
         "producer_profile": {"type": "string", "minLength": 1},
         "content_digest": {"$ref": "#/$defs/digest"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -203,7 +210,7 @@
       "required": [
         "contract", "transition_id", "synthesis_id", "new_state",
         "review_ids", "evidence_ids", "actor", "authority", "reason",
-        "created_at"
+        "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.synthesis-transition/v1"},
@@ -229,6 +236,7 @@
         "actor": {"$ref": "#/$defs/actor"},
         "authority": {"type": "string", "pattern": "^knowledge:[a-z-]+$"},
         "reason": {"type": "string", "minLength": 1},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false

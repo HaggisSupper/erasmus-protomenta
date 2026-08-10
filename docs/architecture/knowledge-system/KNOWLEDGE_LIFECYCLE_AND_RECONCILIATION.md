@@ -14,14 +14,15 @@ A single `status` field cannot safely represent all of the following:
 - whether a concept has been reviewed and is ready for publication;
 - whether a particular publication snapshot is current.
 
-Phase 3 therefore uses four independent state machines. A transition in one plane does not imply a transition in another.
+Phase 3 therefore separates internal lifecycle from channel-relative publication. A transition in one plane does not imply a transition in another.
 
 ```mermaid
 flowchart LR
     C[Candidate disposition] --> R[Reconciliation decision]
     R --> L[Ledger claim state]
-    L --> P[Concept publication lifecycle]
-    P --> S[Snapshot state]
+    L --> P[Internal concept lifecycle]
+    P --> S[Snapshot artifact events]
+    S --> C[Channel publication relation]
 ```
 
 ## 2. Candidate disposition state machine
@@ -260,7 +261,7 @@ Required fields:
 - A contradiction is resolved only by deterministic evidence, a governed epistemic transition, explicit scope separation, or authorized adjudication.
 - “Most sources agree” is not sufficient without independence and credibility analysis.
 
-## 8. Concept publication lifecycle
+## 8. Internal concept lifecycle
 
 ### 8.1 States
 
@@ -268,9 +269,8 @@ Required fields:
 |---|---|
 | `provisional` | Concept/revision is assembled from governed records but not independently reviewed. |
 | `reviewed` | Required review has completed; deterministic validation may remain. |
-| `validated` | Required deterministic, evidence, and policy gates pass. |
+| `validated` | Required deterministic, evidence, and policy gates pass; the revision is eligible for a governed publication plan. |
 | `contested` | One or more material current claims have unresolved contradictions. |
-| `canonical` | Revision is included in the current published OKF snapshot for its scope. |
 | `superseded` | A later concept/revision replaces this concept's role. |
 | `rejected` | Concept is not admissible for publication. |
 | `deprecated` | Concept remains valid for history or compatibility but should not be used for new work. |
@@ -285,21 +285,21 @@ stateDiagram-v2
     reviewed --> validated: evidence and deterministic gates pass
     reviewed --> contested: material contradiction found
     reviewed --> rejected: unsupported or unsafe
-    validated --> canonical: publication approval and snapshot commit
     validated --> contested: new contradiction before publication
+    validated --> superseded: governed replacement accepted
+    validated --> deprecated: retained but discouraged
     contested --> reviewed: contradiction scoped or resolved
     contested --> validated: resolution gates pass
     contested --> rejected: concept premise invalidated
-    canonical --> contested: new material contradiction
-    canonical --> superseded: replacement published
-    canonical --> deprecated: retained but discouraged
-    canonical --> rejected: prohibited; requires withdrawal record
+    contested --> superseded: governed replacement accepted
     deprecated --> superseded: replacement published
     superseded --> [*]
     rejected --> [*]
 ```
 
 A lifecycle state is recorded through append-only transitions. A mutable `current_state` column may exist only as a rebuildable projection.
+
+Publication is not a lifecycle transition. Current/historical/unpublished/withdrawn inclusion is derived independently for each channel from the verified receipted pointer and immutable snapshot membership. A validated revision can be current privately and absent publicly without any lifecycle mutation. Retrieval must never use global lifecycle as channel authorization.
 
 ## 9. Promotion gates
 
@@ -328,7 +328,7 @@ Required:
 - rendering input is complete;
 - 10th-Man review completed when triggered.
 
-### 9.3 `validated -> canonical`
+### 9.3 Validated revision publication gate
 
 Required:
 
@@ -340,9 +340,11 @@ Required:
 - full OKF validation and link validation pass;
 - secret/privacy scan passes;
 - snapshot manifest and rollback target exist;
-- atomic publication receipt succeeds.
+- the receipt-first publication protocol succeeds and the selected channel pointer names that exact committed success receipt.
 
-### 9.4 `canonical -> contested`
+Passing this gate changes only immutable snapshot membership and channel selection. The internal revision remains `validated` (or `contested` when policy explicitly publishes a contested view).
+
+### 9.4 Currently published revision becomes `contested`
 
 Triggered by:
 
@@ -352,9 +354,9 @@ Triggered by:
 - newly discovered scope incompatibility;
 - deterministic test invalidating a published statement.
 
-The prior snapshot remains immutable. Policy decides whether `current` continues to expose it with a contested banner or switches to a withdrawal snapshot.
+The prior snapshot remains immutable. The internal lifecycle appends `contested`; every affected channel independently applies its serving directive and later chooses whether to retain, qualify, or replace its current snapshot.
 
-### 9.5 `canonical -> superseded`
+### 9.5 Internal supersession and channel replacement
 
 Required:
 
@@ -362,7 +364,7 @@ Required:
 - supersession relation and evidence exist;
 - affected inbound links are evaluated;
 - aliases/redirects are planned;
-- new snapshot publishes successfully;
+- each affected channel independently publishes or retains a snapshot under policy;
 - old concept remains accessible by historical snapshot and stable resource ID.
 
 ## 10. Review independence
@@ -388,7 +390,7 @@ Minimum independence dimensions:
 | `create`/`corroborate` | independent review | independent + domain review | human + domain + security review |
 | `contradict` | independent review | 10th-Man + domain/human as policy | human dual control + 10th-Man |
 | `supersede` | independent review | human approval + impact analysis | human dual control + rollback rehearsal |
-| `validated -> canonical` | policy-allowed automation or human | human + 10th-Man | human dual control |
+| Validated revision publication | policy-allowed automation or human | human + 10th-Man | human dual control |
 | Withdrawal | policy or human | human | human dual control |
 
 ## 12. Reconciliation pseudocode
@@ -464,7 +466,7 @@ This preserves human authorship without bypassing evidence and audit controls.
 
 ### 15.1 Rejection
 
-Rejection means “not admitted to canonical knowledge.” It does not delete the candidate or evidence audit record unless retention policy separately requires content removal.
+Rejection means “not eligible for governed publication.” It does not delete the candidate or evidence audit record unless retention policy separately requires content removal.
 
 ### 15.2 Withdrawal
 
@@ -528,5 +530,5 @@ A promoted implementation must prove:
 8. Stale commands fail revision preconditions.
 9. Idempotent retries create no duplicate records.
 10. Model output alone cannot advance any lifecycle state.
-11. Consequential canonical promotion cannot pass without human and 10th-Man records.
+11. Consequential channel publication cannot pass without human and 10th-Man records.
 12. Rollback returns the published pointer to a prior immutable snapshot without deleting evidence.

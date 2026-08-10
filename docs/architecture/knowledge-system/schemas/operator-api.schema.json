@@ -135,7 +135,7 @@
       "required": [
         "contract", "request_id", "operation", "ok", "receipts",
         "evidence_refs", "warnings", "next_actions", "started_at",
-        "completed_at", "duration_ms"
+        "completed_at", "duration_ms", "failure"
       ],
       "properties": {
         "contract": {"const": "erasmus.knowledge-response/v1"},
@@ -174,7 +174,10 @@
         {
           "if": {"properties": {"ok": {"const": true}}},
           "then": {"properties": {"failure": {"type": "null"}}},
-          "else": {"properties": {"failure": {"$ref": "#/$defs/failure"}}}
+          "else": {
+            "required": ["failure"],
+            "properties": {"failure": {"$ref": "#/$defs/failure"}}
+          }
         }
       ],
       "additionalProperties": false

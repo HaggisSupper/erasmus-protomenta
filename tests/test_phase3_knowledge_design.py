@@ -283,7 +283,8 @@ def test_phase3_roadmap_contains_every_prerequisite_and_remains_non_authorizing(
 
     assert "Each increment" in roadmap and "separate bounded mission" in roadmap
     assert "design authority only" in design_index
-    assert "does not expand the authority" in foundry
+    assert "without granting those artifacts epistemic authority" in foundry
+    assert "The foundry does **not**:" in foundry
     assert "The target is non-authorizing" in development_track
 
 

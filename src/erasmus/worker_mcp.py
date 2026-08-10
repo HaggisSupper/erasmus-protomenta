@@ -1,4 +1,4 @@
-"""Sandboxed, advisory MCP bridge for external worker agents."""
+"""Advisory MCP bridge for local worker agents."""
 from __future__ import annotations
 
 import json, os, re, shutil, signal, subprocess, sys
@@ -64,7 +64,8 @@ class WorkerMcpServer:
         return root
 
     def _run(self, operation: str, root: Path, prompt: str, command: str) -> dict[str, Any]:
-        if command not in WORKERS: raise ValueError("worker must be agy, opencode, or codex-spark")
+        if command not in WORKERS:
+            raise ValueError("worker must be agy, opencode, codex, or codex-spark")
         if not isinstance(prompt, str) or not prompt.strip(): raise ValueError("prompt is required")
         profile = WORKER_PROFILES[command]
         executable = shutil.which(profile.executable)

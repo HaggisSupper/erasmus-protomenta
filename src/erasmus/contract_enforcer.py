@@ -44,7 +44,7 @@ class ContractEnforcer:
         if candidate is None or not any(candidate == allowed or allowed in candidate.parents for allowed in self.allowed_roots):
             raise ContractViolation("path is outside the allowed roots")
         if not candidate.is_dir():
-            raise ContractViolation("allowed root does not exist")
+            raise ContractViolation("project root does not exist")
         return candidate
 
     def authorize(self, capability: str, granted: Iterable[str] = ()) -> None:

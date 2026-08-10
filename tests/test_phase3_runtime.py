@@ -15,6 +15,7 @@ def _runtime(tmp_path: Path):
 
     store = Store(str(tmp_path / "erasmus.db"))
     store.init()
+    store.init_phase3()
     return store, KnowledgeRuntime(store, artifact_root=tmp_path / "knowledge")
 
 

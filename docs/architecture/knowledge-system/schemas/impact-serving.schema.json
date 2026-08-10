@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://erasmus.local/schemas/impact-serving.schema.json",
+  "title": "Erasmus Phase 3 Uncertainty, Impact, Use, and Serving Contract Seeds",
+  "description": "Experimental design fixture only. Not registered with the live Erasmus runtime.",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/uncertaintyRecord"},
+    {"$ref": "#/$defs/materialityAssessment"},
+    {"$ref": "#/$defs/knowledgeDependency"},
+    {"$ref": "#/$defs/knowledgeUseReceipt"},
+    {"$ref": "#/$defs/invalidationEvent"},
+    {"$ref": "#/$defs/impactAnalysis"},
+    {"$ref": "#/$defs/servingDirective"}
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^urn:erasmus:[a-z][a-z0-9-]*:[A-Za-z0-9._:-]+$"
+    },
+    "actor": {
+      "type": "string",
+      "pattern": "^(human|process|agent|model|tool):[^\\s]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scope": {
+      "type": "object",
+      "required": ["visibility", "tenant", "labels"],
+      "properties": {
+        "visibility": {"enum": ["private", "project", "shared", "public"]},
+        "tenant": {"type": "string", "minLength": 1},
+        "project": {"type": ["string", "null"]},
+        "domain": {"type": ["string", "null"]},
+        "labels": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "uncertaintyRecord": {
+      "type": "object",
+      "required": [
+        "contract", "uncertainty_id", "subject_id", "kind",
+        "representation", "method", "source_span_ids", "evidence_ids",
+        "scope", "applicability", "status", "created_by", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.uncertainty/v1"},
+        "uncertainty_id": {"$ref": "#/$defs/stableId"},
+        "subject_id": {"$ref": "#/$defs/stableId"},
+        "kind": {
+          "enum": [
+            "measurement", "aleatoric", "model", "semantic", "identity",
+            "scope", "temporal", "evidence_sufficiency", "freshness",
+            "retrieval", "synthesis", "operational"
+          ]
+        },
+        "representation": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "enum": [
+                "interval", "distribution", "standard_uncertainty", "tolerance",
+                "categorical_alternatives", "missing_requirements", "unknown"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "method": {"type": "object"},
+        "source_span_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "evidence_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true},
+        "scope": {"$ref": "#/$defs/scope"},
+        "applicability": {"type": "object"},
+        "status": {"enum": ["current", "superseded", "invalidated"]},
+        "created_by": {"$ref": "#/$defs/actor"},
+        "created_at": {"$ref": "#/$defs/timestamp"},
+        "supersedes_uncertainty_id": {
+          "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
+        }
+      },
+      "additionalProperties": false
+    },
+    "materialityAssessment": {
+      "type": "object",
+      "required": [
+        "contract", "assessment_id", "subject_ids", "intended_use",
+        "risk_class", "possible_effect", "reversibility", "detectability",
+        "affected_channel_ids", "assessment", "evidence_ids",
+        "policy_evaluation_id", "actor", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.materiality-assessment/v1"},
+        "assessment_id": {"$ref": "#/$defs/stableId"},
+        "subject_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "intended_use": {"type": "object"},
+        "risk_class": {"enum": ["routine", "consequential", "protected"]},
+        "possible_effect": {"type": "object"},
+        "reversibility": {"type": "string", "minLength": 1},
+        "detectability": {"type": "string", "minLength": 1},
+        "affected_channel_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "assessment": {"enum": ["immaterial", "qualifying", "material", "critical", "unknown"]},
+        "evidence_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true},
+        "policy_evaluation_id": {"$ref": "#/$defs/stableId"},
+        "actor": {"$ref": "#/$defs/actor"},
+        "review_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "knowledgeDependency": {
+      "type": "object",
+      "required": [
+        "contract", "dependency_id", "from_id", "type", "to_id",
+        "materiality", "qualifiers", "evidence_ids", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.knowledge-dependency/v1"},
+        "dependency_id": {"$ref": "#/$defs/stableId"},
+        "from_id": {"$ref": "#/$defs/stableId"},
+        "type": {"type": "string", "minLength": 1},
+        "to_id": {"$ref": "#/$defs/stableId"},
+        "materiality": {"enum": ["immaterial", "qualifying", "material", "critical", "unknown"]},
+        "qualifiers": {"type": "object"},
+        "decision_id": {
+          "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
+        },
+        "evidence_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true},
+        "created_at": {"$ref": "#/$defs/timestamp"},
+        "supersedes_dependency_id": {
+          "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
+        }
+      },
+      "additionalProperties": false
+    },
+    "knowledgeUseReceipt": {
+      "type": "object",
+      "required": [
+        "contract", "use_receipt_id", "evidence_packet_id", "channel_id",
+        "snapshot_id", "claim_ids", "concept_revision_ids", "source_span_ids",
+        "serving_directive_ids", "usage_class", "materiality", "actor", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.knowledge-use/v1"},
+        "use_receipt_id": {"$ref": "#/$defs/stableId"},
+        "mission_id": {"type": ["integer", "null"], "minimum": 1},
+        "decision_or_action_id": {"type": ["string", "null"]},
+        "evidence_packet_id": {"$ref": "#/$defs/stableId"},
+        "channel_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_id": {"$ref": "#/$defs/stableId"},
+        "claim_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "concept_revision_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "source_span_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "serving_directive_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "usage_class": {"enum": ["retrieved", "presented", "consulted", "cited", "material_to_decision", "rejected_by_decision"]},
+        "materiality": {"enum": ["immaterial", "qualifying", "material", "critical", "unknown"]},
+        "actor": {"$ref": "#/$defs/actor"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "invalidationEvent": {
+      "type": "object",
+      "required": [
+        "contract", "invalidation_event_id", "trigger_kind", "affected_ids",
+        "evidence_ids", "review_ids", "scope", "severity",
+        "policy_evaluation_id", "actor", "authority",
+        "immediate_serving_requirement", "recovery_requirement", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.invalidation-event/v1"},
+        "invalidation_event_id": {"$ref": "#/$defs/stableId"},
+        "trigger_kind": {"type": "string", "minLength": 1},
+        "affected_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "evidence_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true},
+        "review_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "scope": {"$ref": "#/$defs/scope"},
+        "severity": {"enum": ["routine", "qualifying", "material", "critical"]},
+        "policy_evaluation_id": {"$ref": "#/$defs/stableId"},
+        "actor": {"$ref": "#/$defs/actor"},
+        "authority": {"type": "string", "pattern": "^knowledge:[a-z-]+$"},
+        "mission_id": {"type": ["integer", "null"], "minimum": 1},
+        "immediate_serving_requirement": {"enum": ["none", "qualify", "exclude", "block", "channel_suspend"]},
+        "recovery_requirement": {"type": "object"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "impactAnalysis": {
+      "type": "object",
+      "required": [
+        "contract", "impact_id", "invalidation_event_id", "root_subject_ids",
+        "dependency_snapshot", "affected", "materiality_by_subject",
+        "unresolved_dependencies", "recommended_directives",
+        "required_missions", "created_by", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.impact-analysis/v1"},
+        "impact_id": {"$ref": "#/$defs/stableId"},
+        "invalidation_event_id": {"$ref": "#/$defs/stableId"},
+        "root_subject_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "dependency_snapshot": {"type": "object"},
+        "affected": {"type": "object"},
+        "materiality_by_subject": {"type": "object"},
+        "unresolved_dependencies": {"type": "array", "items": {"type": "object"}},
+        "recommended_directives": {"type": "array", "items": {"type": "object"}},
+        "required_missions": {"type": "array", "items": {"type": "object"}},
+        "created_by": {"$ref": "#/$defs/actor"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "servingDirective": {
+      "type": "object",
+      "required": [
+        "contract", "directive_id", "subject_ids", "channel_ids",
+        "scope_selector", "effect", "reason_code", "invalidation_event_id",
+        "evidence_ids", "policy_evaluation_id", "actor", "authority",
+        "effective_at", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.serving-directive/v1"},
+        "directive_id": {"$ref": "#/$defs/stableId"},
+        "subject_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "channel_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "scope_selector": {"type": "object"},
+        "effect": {"enum": ["allow", "qualify", "exclude", "block", "channel_suspend"]},
+        "qualification": {"type": ["object", "null"]},
+        "reason_code": {"type": "string", "minLength": 1},
+        "invalidation_event_id": {"$ref": "#/$defs/stableId"},
+        "impact_id": {
+          "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
+        },
+        "evidence_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true},
+        "policy_evaluation_id": {"$ref": "#/$defs/stableId"},
+        "actor": {"$ref": "#/$defs/actor"},
+        "authority": {"type": "string", "pattern": "^knowledge:[a-z-]+$"},
+        "mission_id": {"type": ["integer", "null"], "minimum": 1},
+        "effective_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {
+          "oneOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]
+        },
+        "replacement_snapshot_id": {
+          "oneOf": [{"$ref": "#/$defs/stableId"}, {"type": "null"}]
+        },
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

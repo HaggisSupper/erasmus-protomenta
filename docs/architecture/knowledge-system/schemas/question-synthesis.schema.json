@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://erasmus.local/schemas/question-synthesis.schema.json",
+  "title": "Erasmus Phase 3 Open Question and Synthesis Contract Seeds",
+  "description": "Experimental design fixture only. Not registered with the live Erasmus runtime.",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/openQuestion"},
+    {"$ref": "#/$defs/questionTransition"},
+    {"$ref": "#/$defs/synthesis"},
+    {"$ref": "#/$defs/synthesisTransition"}
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^urn:erasmus:[a-z][a-z0-9-]*:[A-Za-z0-9._:-]+$"
+    },
+    "actor": {
+      "type": "string",
+      "pattern": "^(human|process|agent|model|tool):[^\\s]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "scope": {
+      "type": "object",
+      "required": ["visibility", "tenant", "labels"],
+      "properties": {
+        "visibility": {"enum": ["private", "project", "shared", "public"]},
+        "tenant": {"type": "string", "minLength": 1},
+        "project": {"type": ["string", "null"]},
+        "domain": {"type": ["string", "null"]},
+        "labels": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "digest": {
+      "type": "object",
+      "required": ["algorithm", "value", "canonicalization"],
+      "properties": {
+        "algorithm": {"const": "sha256"},
+        "value": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "canonicalization": {
+          "enum": ["raw-bytes", "canonical-json/v1", "okf-markdown/v1"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "riskClass": {
+      "enum": ["routine", "consequential", "protected"]
+    },
+    "openQuestionState": {
+      "enum": [
+        "open", "investigating", "partially_answered", "answered",
+        "blocked", "superseded", "closed_invalid"
+      ]
+    },
+    "synthesisState": {
+      "enum": [
+        "provisional", "reviewed", "validated", "contested",
+        "canonical", "superseded", "rejected"
+      ]
+    },
+    "openQuestion": {
+      "type": "object",
+      "required": [
+        "contract", "question_id", "question", "scope", "risk_class",
+        "related_concept_ids", "related_claim_ids", "contradiction_set_ids",
+        "hypothesis_claim_ids", "required_evidence", "required_tests",
+        "exclusions", "created_by", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.open-question/v1"},
+        "question_id": {"$ref": "#/$defs/stableId"},
+        "question": {"type": "string", "minLength": 1},
+        "scope": {"$ref": "#/$defs/scope"},
+        "risk_class": {"$ref": "#/$defs/riskClass"},
+        "related_concept_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "related_claim_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "contradiction_set_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "hypothesis_claim_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "required_evidence": {"type": "array", "items": {"type": "object"}},
+        "required_tests": {"type": "array", "items": {"type": "object"}},
+        "exclusions": {"type": "array", "items": {"type": "string"}},
+        "created_by": {"$ref": "#/$defs/actor"},
+        "created_at": {"$ref": "#/$defs/timestamp"},
+        "target_date": {"type": ["string", "null"], "format": "date"}
+      },
+      "additionalProperties": false
+    },
+    "questionTransition": {
+      "type": "object",
+      "required": [
+        "contract", "transition_id", "question_id", "new_state",
+        "evidence_ids", "answer_claim_ids", "actor", "authority",
+        "policy_version", "reason", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.open-question-transition/v1"},
+        "transition_id": {"$ref": "#/$defs/stableId"},
+        "question_id": {"$ref": "#/$defs/stableId"},
+        "prior_state": {
+          "oneOf": [
+            {"$ref": "#/$defs/openQuestionState"},
+            {"type": "null"}
+          ]
+        },
+        "new_state": {"$ref": "#/$defs/openQuestionState"},
+        "evidence_ids": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1},
+          "uniqueItems": true
+        },
+        "answer_claim_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "actor": {"$ref": "#/$defs/actor"},
+        "authority": {"type": "string", "pattern": "^knowledge:[a-z-]+$"},
+        "mission_id": {"type": ["integer", "null"], "minimum": 1},
+        "policy_version": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "synthesis": {
+      "type": "object",
+      "required": [
+        "contract", "synthesis_id", "synthesis_type", "title", "scope",
+        "risk_class", "input_claim_ids", "input_concept_revision_ids",
+        "input_contradiction_set_ids", "input_source_span_ids",
+        "input_snapshot_id", "content", "omitted_material", "producer",
+        "producer_profile", "content_digest", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.synthesis/v1"},
+        "synthesis_id": {"$ref": "#/$defs/stableId"},
+        "synthesis_type": {
+          "enum": [
+            "concept_summary", "state_of_evidence", "contradiction_summary",
+            "decision_brief", "technical_background", "resolution_summary",
+            "cross_concept_comparison", "lessons_learned"
+          ]
+        },
+        "title": {"type": "string", "minLength": 1},
+        "scope": {"$ref": "#/$defs/scope"},
+        "risk_class": {"$ref": "#/$defs/riskClass"},
+        "input_claim_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "input_concept_revision_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "input_contradiction_set_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "input_source_span_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "input_snapshot_id": {"$ref": "#/$defs/stableId"},
+        "content": {"type": "string", "minLength": 1},
+        "omitted_material": {"type": "array", "items": {"type": "object"}},
+        "producer": {"$ref": "#/$defs/actor"},
+        "producer_profile": {"type": "string", "minLength": 1},
+        "content_digest": {"$ref": "#/$defs/digest"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "synthesisTransition": {
+      "type": "object",
+      "required": [
+        "contract", "transition_id", "synthesis_id", "new_state",
+        "review_ids", "evidence_ids", "actor", "authority", "reason",
+        "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.synthesis-transition/v1"},
+        "transition_id": {"$ref": "#/$defs/stableId"},
+        "synthesis_id": {"$ref": "#/$defs/stableId"},
+        "prior_state": {
+          "oneOf": [
+            {"$ref": "#/$defs/synthesisState"},
+            {"type": "null"}
+          ]
+        },
+        "new_state": {"$ref": "#/$defs/synthesisState"},
+        "review_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1},
+          "uniqueItems": true
+        },
+        "actor": {"$ref": "#/$defs/actor"},
+        "authority": {"type": "string", "pattern": "^knowledge:[a-z-]+$"},
+        "reason": {"type": "string", "minLength": 1},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

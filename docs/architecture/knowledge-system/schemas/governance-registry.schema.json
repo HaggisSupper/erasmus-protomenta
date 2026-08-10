@@ -1,0 +1,415 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://erasmus.local/schemas/governance-registry.schema.json",
+  "title": "Erasmus Phase 3 Policy, Identity, Registry, and Channel Contract Seeds",
+  "description": "Experimental design fixture only. Not registered with the live Erasmus runtime.",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/knowledgePolicySet"},
+    {"$ref": "#/$defs/policyEvaluationReceipt"},
+    {"$ref": "#/$defs/entityRecord"},
+    {"$ref": "#/$defs/entityAlias"},
+    {"$ref": "#/$defs/identityResolutionDecision"},
+    {"$ref": "#/$defs/semanticRegistrySnapshot"},
+    {"$ref": "#/$defs/relationshipTypeDefinition"},
+    {"$ref": "#/$defs/publicationChannel"}
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^urn:erasmus:[a-z][a-z0-9-]*:[A-Za-z0-9._:-]+$"
+    },
+    "actor": {
+      "type": "string",
+      "pattern": "^(human|process|agent|model|tool):[^\\s]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "digest": {
+      "type": "object",
+      "required": ["algorithm", "value", "canonicalization"],
+      "properties": {
+        "algorithm": {"const": "sha256"},
+        "value": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "canonicalization": {
+          "enum": ["raw-bytes", "canonical-json/v1", "okf-markdown/v1"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["visibility", "tenant", "labels"],
+      "properties": {
+        "visibility": {"enum": ["private", "project", "shared", "public"]},
+        "tenant": {"type": "string", "minLength": 1},
+        "project": {"type": ["string", "null"]},
+        "domain": {"type": ["string", "null"]},
+        "labels": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "riskClass": {
+      "enum": ["routine", "consequential", "protected"]
+    },
+    "policyRule": {
+      "type": "object",
+      "required": [
+        "rule_id", "operations", "subject_kinds", "risk_classes",
+        "scope_selector", "source_requirements", "epistemic_requirements",
+        "lifecycle_requirements", "freshness_requirements",
+        "required_authorities", "required_reviews", "human_approval",
+        "tenth_man", "automation", "budgets", "retention", "publication",
+        "fallback", "priority"
+      ],
+      "properties": {
+        "rule_id": {"$ref": "#/$defs/stableId"},
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "subject_kinds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "source", "candidate", "claim", "concept", "relationship",
+              "open_question", "synthesis", "review", "snapshot", "projection",
+              "policy", "registry", "publication_channel"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "risk_classes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/riskClass"},
+          "uniqueItems": true
+        },
+        "scope_selector": {"type": "object"},
+        "source_requirements": {"type": "object"},
+        "epistemic_requirements": {"type": "object"},
+        "lifecycle_requirements": {"type": "object"},
+        "freshness_requirements": {"type": "object"},
+        "required_authorities": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "required_reviews": {
+          "type": "array",
+          "items": {"type": "object"}
+        },
+        "human_approval": {"enum": ["never", "conditional", "required"]},
+        "tenth_man": {"type": "object"},
+        "automation": {"enum": ["deny", "observation_only", "propose_only", "permit"]},
+        "budgets": {"type": "object"},
+        "retention": {"type": "object"},
+        "publication": {"type": "object"},
+        "fallback": {"enum": ["deny", "degrade", "qualify", "request_approval", "create_mission_candidate"]},
+        "priority": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
+    "knowledgePolicySet": {
+      "type": "object",
+      "required": [
+        "contract", "policy_id", "version", "policy_digest", "scope",
+        "status", "effective_at", "rules", "created_by", "created_at",
+        "review_ids"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.knowledge-policy/v1"},
+        "policy_id": {"$ref": "#/$defs/stableId"},
+        "version": {"$ref": "#/$defs/semver"},
+        "policy_digest": {"$ref": "#/$defs/digest"},
+        "scope": {"$ref": "#/$defs/scope"},
+        "status": {
+          "enum": [
+            "proposed", "reviewed", "approved", "active", "superseded",
+            "suspended", "revoked", "expired"
+          ]
+        },
+        "effective_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {
+          "oneOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "parent_policy_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "parent_policy_version": {
+          "oneOf": [
+            {"$ref": "#/$defs/semver"},
+            {"type": "null"}
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/policyRule"}
+        },
+        "created_by": {"$ref": "#/$defs/actor"},
+        "created_at": {"$ref": "#/$defs/timestamp"},
+        "review_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "approval_id": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "policyEvaluationReceipt": {
+      "type": "object",
+      "required": [
+        "contract", "evaluation_id", "policy_id", "policy_version",
+        "policy_digest", "operation", "subject_ids", "request_digest",
+        "matched_rule_ids", "decision", "required_authorities",
+        "required_reviews", "required_approvals", "remaining_conditions",
+        "budgets", "reason_codes", "evaluated_by", "evaluated_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.policy-evaluation/v1"},
+        "evaluation_id": {"$ref": "#/$defs/stableId"},
+        "policy_id": {"$ref": "#/$defs/stableId"},
+        "policy_version": {"$ref": "#/$defs/semver"},
+        "policy_digest": {"$ref": "#/$defs/digest"},
+        "operation": {"type": "string", "minLength": 1},
+        "subject_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "request_digest": {"$ref": "#/$defs/digest"},
+        "matched_rule_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "decision": {
+          "enum": [
+            "permit", "deny", "observation_only", "requires_review",
+            "requires_human_approval", "requires_tenth_man", "insufficient_policy"
+          ]
+        },
+        "required_authorities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "required_reviews": {"type": "array", "items": {"type": "object"}},
+        "required_approvals": {"type": "array", "items": {"type": "object"}},
+        "remaining_conditions": {"type": "array", "items": {"type": "object"}},
+        "budgets": {"type": "object"},
+        "reason_codes": {"type": "array", "items": {"type": "string"}},
+        "evaluated_by": {"$ref": "#/$defs/actor"},
+        "evaluated_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "identifier": {
+      "type": "object",
+      "required": ["namespace", "value", "source_span_ids"],
+      "properties": {
+        "namespace": {"type": "string", "minLength": 1},
+        "value": {"type": "string", "minLength": 1},
+        "valid_from": {"type": ["string", "null"], "format": "date-time"},
+        "valid_to": {"type": ["string", "null"], "format": "date-time"},
+        "source_span_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "entityRecord": {
+      "type": "object",
+      "required": [
+        "contract", "entity_id", "entity_type", "canonical_label", "scope",
+        "identifiers", "created_by", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.entity/v1"},
+        "entity_id": {"$ref": "#/$defs/stableId"},
+        "entity_type": {"type": "string", "minLength": 1},
+        "canonical_label": {"type": "string", "minLength": 1},
+        "scope": {"$ref": "#/$defs/scope"},
+        "identifiers": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/identifier"}
+        },
+        "created_by": {"$ref": "#/$defs/actor"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "entityAlias": {
+      "type": "object",
+      "required": [
+        "contract", "alias_id", "entity_id", "alias", "normalized_alias",
+        "alias_kind", "scope", "evidence_ids", "source_span_ids",
+        "created_by", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.entity-alias/v1"},
+        "alias_id": {"$ref": "#/$defs/stableId"},
+        "entity_id": {"$ref": "#/$defs/stableId"},
+        "alias": {"type": "string", "minLength": 1},
+        "normalized_alias": {"type": "string", "minLength": 1},
+        "alias_kind": {
+          "enum": ["name", "acronym", "prior_name", "path", "identifier", "misspelling", "display_label"]
+        },
+        "language": {"type": ["string", "null"]},
+        "valid_from": {"type": ["string", "null"], "format": "date-time"},
+        "valid_to": {"type": ["string", "null"], "format": "date-time"},
+        "scope": {"$ref": "#/$defs/scope"},
+        "evidence_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true},
+        "source_span_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "created_by": {"$ref": "#/$defs/actor"},
+        "created_at": {"$ref": "#/$defs/timestamp"},
+        "supersedes_alias_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "identityResolutionDecision": {
+      "type": "object",
+      "required": [
+        "contract", "decision_id", "proposal_id", "relation",
+        "source_entity_ids", "target_entity_ids", "qualifiers", "evidence_ids",
+        "review_ids", "actor", "authority", "mission_id",
+        "policy_evaluation_id", "reason_codes", "idempotency_key", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.identity-resolution-decision/v1"},
+        "decision_id": {"$ref": "#/$defs/stableId"},
+        "proposal_id": {"$ref": "#/$defs/stableId"},
+        "relation": {"enum": ["same_entity", "distinct_entity", "alias_of", "successor_of", "version_of", "part_of", "unresolved"]},
+        "source_entity_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "target_entity_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "qualifiers": {"type": "object"},
+        "evidence_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true},
+        "review_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
+        "actor": {"$ref": "#/$defs/actor"},
+        "authority": {"type": "string", "pattern": "^knowledge:[a-z-]+$"},
+        "mission_id": {"type": "integer", "minimum": 1},
+        "policy_evaluation_id": {"$ref": "#/$defs/stableId"},
+        "reason_codes": {"type": "array", "items": {"type": "string"}},
+        "idempotency_key": {"type": "string", "minLength": 1},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "semanticDefinition": {
+      "type": "object",
+      "required": ["definition_id", "kind", "version", "content", "content_digest"],
+      "properties": {
+        "definition_id": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["entity_type", "concept_type", "predicate", "relationship_type", "source_kind", "rendering_profile", "projection_profile"]},
+        "version": {"$ref": "#/$defs/semver"},
+        "content": {"type": "object"},
+        "content_digest": {"$ref": "#/$defs/digest"}
+      },
+      "additionalProperties": false
+    },
+    "semanticRegistrySnapshot": {
+      "type": "object",
+      "required": [
+        "contract", "registry_snapshot_id", "sequence", "definitions",
+        "manifest_digest", "status", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.semantic-registry-snapshot/v1"},
+        "registry_snapshot_id": {"$ref": "#/$defs/stableId"},
+        "sequence": {"type": "integer", "minimum": 1},
+        "parent_snapshot_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "definitions": {"type": "array", "items": {"$ref": "#/$defs/semanticDefinition"}},
+        "manifest_digest": {"$ref": "#/$defs/digest"},
+        "status": {"enum": ["proposed", "reviewed", "approved", "active", "superseded", "revoked"]},
+        "created_at": {"$ref": "#/$defs/timestamp"},
+        "approval_id": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "relationshipTypeDefinition": {
+      "type": "object",
+      "required": [
+        "contract", "relationship_type_id", "label", "source_types",
+        "target_types", "symmetric", "transitive", "cardinality",
+        "cycle_policy", "qualifier_schema", "evidence_required",
+        "policy_effective", "renderer", "status"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.relationship-type/v1"},
+        "relationship_type_id": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1},
+        "source_types": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "target_types": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "inverse_type": {"type": ["string", "null"]},
+        "symmetric": {"type": "boolean"},
+        "transitive": {"type": "boolean"},
+        "cardinality": {"type": "object"},
+        "cycle_policy": {"enum": ["forbid", "permit", "bounded"]},
+        "qualifier_schema": {"type": "object"},
+        "evidence_required": {"type": "boolean"},
+        "policy_effective": {"type": "boolean"},
+        "renderer": {"type": "object"},
+        "status": {"enum": ["proposed", "active", "superseded", "revoked"]}
+      },
+      "additionalProperties": false
+    },
+    "publicationChannel": {
+      "type": "object",
+      "required": [
+        "contract", "channel_id", "name", "audience", "scope_selector",
+        "root_path", "policy_id", "policy_version", "rendering_profile",
+        "retention", "status"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.publication-channel/v1"},
+        "channel_id": {"$ref": "#/$defs/stableId"},
+        "name": {"type": "string", "minLength": 1},
+        "audience": {"enum": ["private", "project", "shared", "public"]},
+        "scope_selector": {"type": "object"},
+        "root_path": {"type": "string", "minLength": 1},
+        "policy_id": {"$ref": "#/$defs/stableId"},
+        "policy_version": {"$ref": "#/$defs/semver"},
+        "rendering_profile": {"type": "string", "minLength": 1},
+        "retention": {"type": "object"},
+        "redaction_profile": {"type": ["string", "null"]},
+        "current_snapshot_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "status": {"enum": ["proposed", "active", "suspended", "retired"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}

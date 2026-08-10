@@ -7,6 +7,7 @@ from .migrations import apply_migrations
 from .phase3_completion_migrations import apply_phase3_completion
 from .phase3_hardening import apply_phase3_hardening
 from .phase3_migrations import apply_phase3_migrations
+from .phase3_review_migrations import apply_phase3_review_migrations
 
 
 class Store:
@@ -38,6 +39,7 @@ class Store:
         applied = apply_phase3_migrations(self.db)
         applied.extend(apply_phase3_hardening(self.db))
         applied.extend(apply_phase3_completion(self.db))
+        applied.extend(apply_phase3_review_migrations(self.db))
         return applied
 
     def add_event(self, kind: str, payload: str) -> int:

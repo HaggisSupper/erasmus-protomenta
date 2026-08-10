@@ -163,8 +163,10 @@ def test_phase3_state_planes_are_explicit_and_not_conflated() -> None:
     lifecycle = (PACKAGE / "KNOWLEDGE_LIFECYCLE_AND_RECONCILIATION.md").read_text(
         encoding="utf-8"
     )
-    schema = (PACKAGE / "schemas" / "knowledge-system.schema.json").read_text(
-        encoding="utf-8"
+    schema_doc = json.loads(
+        (PACKAGE / "schemas" / "knowledge-system.schema.json").read_text(
+            encoding="utf-8"
+        )
     )
 
     required_state_names = {
@@ -192,8 +194,33 @@ def test_phase3_state_planes_are_explicit_and_not_conflated() -> None:
     assert "`provisional -> reviewed`" in lifecycle
     assert "[*] --> draft" not in lifecycle
     assert "`draft -> reviewed`" not in lifecycle
-    assert '"provisional", "reviewed", "validated", "contested", "canonical"' in schema
-    assert '"draft", "reviewed", "validated", "contested", "canonical"' not in schema
+
+    concept_lifecycle = schema_doc["$defs"]["evidencePacketItem"]["properties"][
+        "concept_lifecycle"
+    ]["enum"]
+    assert concept_lifecycle == [
+        "provisional",
+        "reviewed",
+        "validated",
+        "contested",
+        "canonical",
+        "superseded",
+        "rejected",
+        "deprecated",
+    ]
+    assert "draft" not in concept_lifecycle
+
+    snapshot = schema_doc["$defs"]["canonicalSnapshot"]
+    assert "snapshot_state" in snapshot["required"]
+    assert "status" not in snapshot["required"]
+    assert "snapshot_state" in snapshot["properties"]
+    assert "status" not in snapshot["properties"]
+
+    projection = schema_doc["$defs"]["projectionManifest"]
+    assert "projection_state" in projection["required"]
+    assert "status" not in projection["required"]
+    assert "projection_state" in projection["properties"]
+    assert "status" not in projection["properties"]
 
 
 def test_phase3_authority_and_source_of_truth_boundaries_are_concrete() -> None:

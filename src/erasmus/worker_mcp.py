@@ -120,9 +120,17 @@ class WorkerMcpServer:
 
     def serve(self, input_stream: TextIO=sys.stdin, output_stream: TextIO=sys.stdout) -> None:
         for line in input_stream:
-            if line.strip():
-                response=self.handle(json.loads(line))
-                if response is not None: output_stream.write(json.dumps(response)+"\n"); output_stream.flush()
+            if not line.strip():
+                continue
+            try:
+                request = json.loads(line)
+            except json.JSONDecodeError as error:
+                response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(error)}}
+            else:
+                response = self.handle(request)
+            if response is not None:
+                output_stream.write(json.dumps(response) + "\n")
+                output_stream.flush()
 
 def main() -> None: WorkerMcpServer((Path.cwd(),)).serve()
 if __name__ == "__main__": main()

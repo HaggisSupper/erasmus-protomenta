@@ -48,6 +48,7 @@ def main() -> None:
     args = parser.parse_args()
     store = Store(args.db)
     store.init()
+    store.init_phase3()
     rt = KnowledgeRuntime(store, args.artifact_root)
 
     if args.cmd == "status":

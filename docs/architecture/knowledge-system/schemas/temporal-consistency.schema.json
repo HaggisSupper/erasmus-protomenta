@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://erasmus.local/schemas/temporal-consistency.schema.json",
+  "title": "Erasmus Phase 3 Temporal and Consistency Contract Seeds",
+  "description": "Experimental design fixture only. Not registered with the live Erasmus runtime.",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/temporalScope"},
+    {"$ref": "#/$defs/consistencySelection"},
+    {"$ref": "#/$defs/historicalQueryReceipt"}
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^urn:erasmus:[a-z][a-z0-9-]*:[A-Za-z0-9._:-]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timeInterval": {
+      "type": "object",
+      "required": ["from", "to", "semantics"],
+      "properties": {
+        "from": {
+          "oneOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "to": {
+          "oneOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "semantics": {"const": "half-open"}
+      },
+      "additionalProperties": false
+    },
+    "temporalScope": {
+      "type": "object",
+      "required": [
+        "contract", "valid_at", "valid_during", "as_known_at",
+        "as_known_sequence", "published_snapshot_id", "channel_id", "timezone"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.temporal-scope/v1"},
+        "valid_at": {
+          "oneOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "valid_during": {
+          "oneOf": [
+            {"$ref": "#/$defs/timeInterval"},
+            {"type": "null"}
+          ]
+        },
+        "as_known_at": {
+          "oneOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "as_known_sequence": {"type": ["integer", "null"], "minimum": 1},
+        "published_snapshot_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "channel_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "timezone": {"const": "UTC"}
+      },
+      "allOf": [
+        {
+          "not": {
+            "properties": {
+              "valid_at": {"type": "string"},
+              "valid_during": {"type": "object"}
+            },
+            "required": ["valid_at", "valid_during"]
+          }
+        },
+        {
+          "not": {
+            "properties": {
+              "as_known_at": {"type": "string"},
+              "as_known_sequence": {"type": "integer"}
+            },
+            "required": ["as_known_at", "as_known_sequence"]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "consistencySelection": {
+      "type": "object",
+      "required": [
+        "contract", "consistency", "temporal_scope",
+        "include_later_corrections"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.consistency-selection/v1"},
+        "consistency": {
+          "enum": [
+            "published_current", "published_snapshot", "operational_review",
+            "candidate_review", "historical_as_known", "historical_valid_at"
+          ]
+        },
+        "temporal_scope": {"$ref": "#/$defs/temporalScope"},
+        "include_later_corrections": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "historicalQueryReceipt": {
+      "type": "object",
+      "required": [
+        "contract", "receipt_id", "request_id", "consistency",
+        "normalized_temporal_scope", "transaction_boundary",
+        "snapshot_id", "channel_id", "policy_id", "policy_version",
+        "registry_snapshot_id", "directive_set_digest", "content_availability",
+        "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.historical-query-receipt/v1"},
+        "receipt_id": {"$ref": "#/$defs/stableId"},
+        "request_id": {"$ref": "#/$defs/stableId"},
+        "consistency": {
+          "enum": [
+            "published_current", "published_snapshot", "operational_review",
+            "candidate_review", "historical_as_known", "historical_valid_at"
+          ]
+        },
+        "normalized_temporal_scope": {"$ref": "#/$defs/temporalScope"},
+        "transaction_boundary": {
+          "type": "object",
+          "required": ["sequence", "recorded_at"],
+          "properties": {
+            "sequence": {"type": "integer", "minimum": 1},
+            "recorded_at": {"$ref": "#/$defs/timestamp"}
+          },
+          "additionalProperties": false
+        },
+        "snapshot_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "channel_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "policy_id": {"$ref": "#/$defs/stableId"},
+        "policy_version": {"type": "string", "minLength": 1},
+        "registry_snapshot_id": {"$ref": "#/$defs/stableId"},
+        "directive_set_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "content_availability": {
+          "enum": ["complete", "partial", "metadata_only", "unavailable"]
+        },
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

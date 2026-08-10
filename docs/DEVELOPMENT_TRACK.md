@@ -67,6 +67,24 @@ Add only after operational governance is stable:
 
 Knowledge describes. Contracts constrain. Tools execute. Evidence validates. Wiki knowledge must never silently grant authority or mutate immutable contracts.
 
+### Defined Phase 3 target
+
+The complete target design is documented in:
+
+- [`docs/architecture/knowledge-system/README.md`](architecture/knowledge-system/README.md)
+- [`docs/architecture/knowledge-system/ERASMUS_PHASE_3_KNOWLEDGE_SYSTEM_SPEC.md`](architecture/knowledge-system/ERASMUS_PHASE_3_KNOWLEDGE_SYSTEM_SPEC.md)
+- [`docs/architecture/knowledge-system/CONTRACT_CATALOGUE.md`](architecture/knowledge-system/CONTRACT_CATALOGUE.md)
+- [`docs/architecture/knowledge-system/KNOWLEDGE_LIFECYCLE_AND_RECONCILIATION.md`](architecture/knowledge-system/KNOWLEDGE_LIFECYCLE_AND_RECONCILIATION.md)
+- [`docs/architecture/knowledge-system/STORAGE_PROJECTION_AND_RETRIEVAL.md`](architecture/knowledge-system/STORAGE_PROJECTION_AND_RETRIEVAL.md)
+- [`docs/architecture/knowledge-system/SECURITY_PRIVACY_AND_GOVERNANCE.md`](architecture/knowledge-system/SECURITY_PRIVACY_AND_GOVERNANCE.md)
+- [`docs/architecture/knowledge-system/TEST_AND_ACCEPTANCE_PLAN.md`](architecture/knowledge-system/TEST_AND_ACCEPTANCE_PLAN.md)
+- [`docs/roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md`](roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md)
+- [`docs/adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md`](adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md)
+
+The target keeps the existing epistemic ledger authoritative for proposition truth state, adds append-only records for concept/revision/review/publication governance, emits immutable OKF v0.2 publication snapshots, and treats lexical, vector, graph, cache, and UI stores as rebuildable projections.
+
+The target is non-authorizing. It is decomposed into roadmap increments P3.0 through P3.14. Each increment requires an observed need, a fresh bounded mission, additive/versioned contracts, disabled-by-default or observation-only rollout where applicable, deterministic and negative tests, backup/migration/rollback evidence, independent review, and 10th-Man validation.
+
 ## Extension seams to preserve now
 
 Phase 1 must remain forward-compatible through stable IDs and versions, namespaced concept/profile types, provenance on consequential records, explicit authority boundaries, extensible event and evidence schemas, migration support, generated-document separation from canonical manifests, and no hard-coded assumption that only one agent, skill, tool, or concept type can exist.

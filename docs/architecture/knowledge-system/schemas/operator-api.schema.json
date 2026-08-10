@@ -1,0 +1,278 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://erasmus.local/schemas/operator-api.schema.json",
+  "title": "Erasmus Phase 3 Operator and Job Contract Seeds",
+  "description": "Experimental design fixture only. Not registered with the live Erasmus runtime.",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/knowledgeRequest"},
+    {"$ref": "#/$defs/knowledgeResponse"},
+    {"$ref": "#/$defs/knowledgeJob"},
+    {"$ref": "#/$defs/progressEvent"}
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^urn:erasmus:[a-z][a-z0-9-]*:[A-Za-z0-9._:-]+$"
+    },
+    "actor": {
+      "type": "string",
+      "pattern": "^(human|process|agent|model|tool):[^\\s]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "scope": {
+      "type": "object",
+      "required": ["visibility", "tenant", "labels"],
+      "properties": {
+        "visibility": {"enum": ["private", "project", "shared", "public"]},
+        "tenant": {"type": "string", "minLength": 1},
+        "project": {"type": ["string", "null"]},
+        "domain": {"type": ["string", "null"]},
+        "labels": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "policySelector": {
+      "type": "object",
+      "required": ["policy_id", "version"],
+      "properties": {
+        "policy_id": {"$ref": "#/$defs/stableId"},
+        "version": {"$ref": "#/$defs/semver"}
+      },
+      "additionalProperties": false
+    },
+    "budgets": {
+      "type": "object",
+      "required": ["timeout_seconds", "retry_limit", "max_model_calls", "max_output_bytes"],
+      "properties": {
+        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "retry_limit": {"type": "integer", "minimum": 0},
+        "max_model_calls": {"type": "integer", "minimum": 0},
+        "max_output_bytes": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "failure": {
+      "type": "object",
+      "required": ["code", "message", "details", "retryable", "action", "related_ids"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1},
+        "details": {"type": "object"},
+        "retryable": {"type": "boolean"},
+        "action": {"type": "string", "minLength": 1},
+        "related_ids": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "knowledgeRequest": {
+      "type": "object",
+      "required": [
+        "contract", "request_id", "operation", "actor", "authority",
+        "idempotency_key", "expected_revisions", "policy",
+        "registry_snapshot_id", "scope", "input", "evidence_ids",
+        "review_ids", "budgets", "dry_run", "requested_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.knowledge-request/v1"},
+        "request_id": {"$ref": "#/$defs/stableId"},
+        "operation": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_-]*$"},
+        "mission_id": {"type": ["integer", "null"], "minimum": 1},
+        "actor": {"$ref": "#/$defs/actor"},
+        "authority": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "idempotency_key": {"type": "string", "minLength": 1},
+        "expected_revisions": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        },
+        "policy": {"$ref": "#/$defs/policySelector"},
+        "registry_snapshot_id": {"$ref": "#/$defs/stableId"},
+        "channel_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "scope": {"$ref": "#/$defs/scope"},
+        "input": {"type": "object"},
+        "evidence_ids": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1},
+          "uniqueItems": true
+        },
+        "review_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        },
+        "budgets": {"$ref": "#/$defs/budgets"},
+        "dry_run": {"type": "boolean"},
+        "requested_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "knowledgeResponse": {
+      "type": "object",
+      "required": [
+        "contract", "request_id", "operation", "ok", "receipts",
+        "evidence_refs", "warnings", "next_actions", "started_at",
+        "completed_at", "duration_ms"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.knowledge-response/v1"},
+        "request_id": {"$ref": "#/$defs/stableId"},
+        "operation": {"type": "string", "minLength": 1},
+        "ok": {"type": "boolean"},
+        "result": {"type": ["object", "null"]},
+        "job_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "receipts": {
+          "type": "array",
+          "items": {"type": "object"}
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "warnings": {"type": "array", "items": {"type": "object"}},
+        "next_actions": {"type": "array", "items": {"type": "object"}},
+        "failure": {
+          "oneOf": [
+            {"$ref": "#/$defs/failure"},
+            {"type": "null"}
+          ]
+        },
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "completed_at": {"$ref": "#/$defs/timestamp"},
+        "duration_ms": {"type": "integer", "minimum": 0}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"ok": {"const": true}}},
+          "then": {"properties": {"failure": {"type": "null"}}},
+          "else": {"properties": {"failure": {"$ref": "#/$defs/failure"}}}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "knowledgeJob": {
+      "type": "object",
+      "required": [
+        "contract", "job_id", "request_id", "mission_id", "operation",
+        "state", "priority", "checkpoint", "attempt", "retry_limit",
+        "cancel_requested", "progress", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.knowledge-job/v1"},
+        "job_id": {"$ref": "#/$defs/stableId"},
+        "request_id": {"$ref": "#/$defs/stableId"},
+        "mission_id": {"type": "integer", "minimum": 1},
+        "operation": {"type": "string", "minLength": 1},
+        "state": {
+          "enum": [
+            "queued", "running", "paused", "blocked", "cancelling",
+            "cancelled", "completed", "failed"
+          ]
+        },
+        "priority": {"type": "integer"},
+        "lease": {"type": ["object", "null"]},
+        "checkpoint": {"type": "object"},
+        "attempt": {"type": "integer", "minimum": 0},
+        "retry_limit": {"type": "integer", "minimum": 0},
+        "cancel_requested": {"type": "boolean"},
+        "progress": {
+          "type": "object",
+          "required": ["completed_units", "total_units", "current_stage"],
+          "properties": {
+            "completed_units": {"type": "integer", "minimum": 0},
+            "total_units": {"type": ["integer", "null"], "minimum": 0},
+            "current_stage": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        "created_at": {"$ref": "#/$defs/timestamp"},
+        "started_at": {
+          "oneOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "completed_at": {
+          "oneOf": [
+            {"$ref": "#/$defs/timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "failure": {
+          "oneOf": [
+            {"$ref": "#/$defs/failure"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "progressEvent": {
+      "type": "object",
+      "required": [
+        "contract", "event_id", "job_id", "request_id", "stage",
+        "completed_units", "total_units", "warnings", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.knowledge-progress/v1"},
+        "event_id": {"$ref": "#/$defs/stableId"},
+        "job_id": {"$ref": "#/$defs/stableId"},
+        "request_id": {"$ref": "#/$defs/stableId"},
+        "stage": {"type": "string", "minLength": 1},
+        "completed_units": {"type": "integer", "minimum": 0},
+        "total_units": {"type": ["integer", "null"], "minimum": 0},
+        "current_subject_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "checkpoint_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "warnings": {"type": "array", "items": {"type": "object"}},
+        "terminal": {"type": "boolean", "default": false},
+        "failure": {
+          "oneOf": [
+            {"$ref": "#/$defs/failure"},
+            {"type": "null"}
+          ]
+        },
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

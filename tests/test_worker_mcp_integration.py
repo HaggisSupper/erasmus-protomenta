@@ -1,0 +1,78 @@
+"""Contract tests for the worker MCP boundary.
+
+These tests deliberately exercise the stream boundary rather than the CLI so
+malformed/untrusted worker output cannot become an authority-bearing result.
+"""
+import io
+import json
+from unittest.mock import patch
+
+from erasmus.worker_mcp import WorkerMcpServer
+
+
+def _request(name="worker_test", **arguments):
+    return {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments}}
+
+
+def test_json_line_framing_and_notification_suppression(tmp_path):
+    server = WorkerMcpServer((tmp_path,))
+    stream = io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"}) + "\n"
+                         + json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+    output = io.StringIO()
+    server.serve(stream, output)
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert [message["id"] for message in messages] == [1]
+    assert messages[0]["result"]["serverInfo"]["name"] == "erasmus-worker"
+
+
+def test_malformed_message_returns_jsonrpc_error(tmp_path):
+    output = io.StringIO()
+    WorkerMcpServer((tmp_path,)).serve(io.StringIO("not-json\n"), output)
+    response = json.loads(output.getvalue())
+    assert response["error"]["code"] == -32700
+
+
+def test_worker_crash_is_failed_and_advisory(tmp_path):
+    server = WorkerMcpServer((tmp_path,))
+    process = type(
+        "P",
+        (),
+        {
+            "pid": 1,
+            "returncode": 7,
+            "communicate": lambda self, **_: ("", "boom"),
+            "kill": lambda self: None,
+            "wait": lambda self: None,
+        },
+    )()
+    with patch("erasmus.worker_mcp.shutil.which", return_value="agy"), patch(
+        "erasmus.worker_mcp.subprocess.Popen", return_value=process
+    ):
+        response = server.handle(_request(project_root=str(tmp_path), worker="agy"))
+    value = json.loads(response["result"]["content"][0]["text"])
+    assert value["status"] == "failed"
+    assert value["advisory"] is True and value["authorization"] == "none"
+    assert "boom" in value["output"]
+
+
+def test_worker_output_is_bounded(tmp_path):
+    server = WorkerMcpServer((tmp_path,))
+    process = type(
+        "P",
+        (),
+        {
+            "pid": 1,
+            "returncode": 0,
+            "communicate": lambda self, **_: ("x" * 100_000, ""),
+            "kill": lambda self: None,
+            "wait": lambda self: None,
+        },
+    )()
+    with patch("erasmus.worker_mcp.shutil.which", return_value="agy"), patch(
+        "erasmus.worker_mcp.subprocess.Popen", return_value=process
+    ):
+        response = server.handle(_request(project_root=str(tmp_path), worker="agy"))
+    value = json.loads(response["result"]["content"][0]["text"])
+    assert len(value["output"]) <= 20_000
+

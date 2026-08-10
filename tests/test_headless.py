@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import os
 import subprocess
+import warnings
 
 import pytest
 
@@ -56,6 +57,20 @@ def test_mistralrs_rejects_unproven_lora_xlora_combination():
         HeadlessSpec("mistralrs", "base", lora=("adapter",), xlora="xlora")
 
 
+def test_xlora_is_rejected_for_non_mistralrs_backends():
+    with pytest.raises(HeadlessConfigurationError, match="only by the mistralrs backend"):
+        HeadlessSpec("llama_cpp", "model.gguf", xlora="adapter")
+    with pytest.raises(HeadlessConfigurationError, match="only by the mistralrs backend"):
+        HeadlessSpec("lmstudio", "model", xlora_order="order.json")
+
+
+def test_xlora_is_deprecated_for_mistralrs():
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        HeadlessSpec("mistralrs", "model", xlora="adapter")
+    assert any(item.category is DeprecationWarning for item in caught)
+
+
 def test_mistralrs_server_command_places_server_flags_before_subcommand():
     assert build_server_command(HeadlessSpec("mistralrs", "base", host="127.0.0.2", port=4321)) == (
         "mistralrs", "serve", "--host", "127.0.0.2", "--port", "4321",
@@ -65,7 +80,6 @@ def test_mistralrs_server_command_places_server_flags_before_subcommand():
 
 def test_router_uses_ordered_fallback_without_starting_losers_after_success():
     called = []
-
     def runner(spec, prompt, timeout):
         called.append(spec.model)
         return HeadlessResult(spec=spec, content=prompt, latency_seconds=0.03)

@@ -6,6 +6,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass
 from enum import Enum
 from threading import Thread
@@ -83,6 +84,14 @@ class HeadlessSpec:
             raise HeadlessConfigurationError("LoRA adapter paths must be non-empty strings")
         if self.xlora is not None and not self.xlora.strip():
             raise HeadlessConfigurationError("XLora adapter path must be non-empty")
+        if (self.xlora or self.xlora_order or self.target_non_granular_index is not None) and self.backend != "mistralrs":
+            raise HeadlessConfigurationError("X-LoRA is supported only by the mistralrs backend")
+        if self.xlora or self.xlora_order or self.target_non_granular_index is not None:
+            warnings.warn(
+                "X-LoRA support is deprecated; use standard LoRA adapters or an external adapter runtime",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         if self.lora and self.xlora:
             raise HeadlessConfigurationError("LoRA and X-LoRA cannot be combined without real CLI evidence")
 

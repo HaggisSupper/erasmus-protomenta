@@ -309,7 +309,7 @@
     "canonicalSnapshot": {
       "type": "object",
       "required": [
-        "contract", "snapshot_id", "sequence", "scope", "status",
+        "contract", "snapshot_id", "sequence", "scope", "snapshot_state",
         "root_path", "concept_revision_ids", "created_at"
       ],
       "properties": {
@@ -323,7 +323,7 @@
           ]
         },
         "scope": {"$ref": "#/$defs/scope"},
-        "status": {
+        "snapshot_state": {
           "enum": ["building", "validated", "approved", "published", "withdrawn", "failed"]
         },
         "manifest_digest": {
@@ -358,7 +358,7 @@
       "type": "object",
       "required": [
         "contract", "projection_id", "kind", "source_snapshot_id",
-        "builder", "configuration", "scope", "status", "created_at"
+        "builder", "configuration", "scope", "projection_state", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.knowledge-projection/v1"},
@@ -369,7 +369,7 @@
         "configuration": {"type": "object"},
         "model_identity": {"type": ["object", "null"]},
         "scope": {"$ref": "#/$defs/scope"},
-        "status": {"enum": ["queued", "building", "ready", "failed", "stale", "retired"]},
+        "projection_state": {"enum": ["queued", "building", "ready", "failed", "stale", "retired"]},
         "artifact_digest": {
           "oneOf": [
             {"$ref": "#/$defs/digest"},

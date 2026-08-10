@@ -10,12 +10,9 @@ from .phase3_migrations import apply_phase3_migrations
 class Store:
     """Durable SQLite-backed state store for the Erasmus cognitive kernel.
 
-    Opens the database with WAL journal mode and foreign-key enforcement,
-    then applies all pending schema migrations via :func:`apply_migrations`
-    followed by the additive Phase 3 migration series.
-
-    All write operations are transactional: a failure leaves the database in
-    its previous committed state.
+    ``init()`` preserves the established kernel schema boundary. Phase 3 is an
+    additive, explicitly activated subsystem and therefore uses
+    ``init_phase3()`` rather than silently broadening every Store consumer.
     """
 
     def __init__(self, path: str = "state/erasmus.db") -> None:
@@ -27,9 +24,17 @@ class Store:
         self.db.execute("PRAGMA foreign_keys=ON")
 
     def init(self) -> None:
-        """Apply legacy and Phase 3 migrations exactly once."""
+        """Apply the established kernel migrations exactly once."""
         apply_migrations(self.db)
-        apply_phase3_migrations(self.db)
+
+    def init_phase3(self) -> list[int]:
+        """Explicitly activate the additive Phase 3 schema.
+
+        Callers that instantiate the Phase 3 knowledge runtime must invoke this
+        after ``init()``. The operation is idempotent and records migrations in
+        the same auditable schema-version ledger.
+        """
+        return apply_phase3_migrations(self.db)
 
     def add_event(self, kind: str, payload: str) -> int:
         with self.db:

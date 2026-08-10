@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from .migrations import apply_migrations
+from .phase3_hardening import apply_phase3_hardening
 from .phase3_migrations import apply_phase3_migrations
 
 
@@ -24,17 +25,19 @@ class Store:
         self.db.execute("PRAGMA foreign_keys=ON")
 
     def init(self) -> None:
-        """Apply the established kernel migrations exactly once."""
+        """Apply any unapplied established-kernel migrations."""
         apply_migrations(self.db)
 
     def init_phase3(self) -> list[int]:
-        """Explicitly activate the additive Phase 3 schema.
+        """Explicitly activate and harden the additive Phase 3 schema.
 
-        Callers that instantiate the Phase 3 knowledge runtime must invoke this
-        after ``init()``. The operation is idempotent and records migrations in
-        the same auditable schema-version ledger.
+        Callers that instantiate the Phase 3 knowledge runtime invoke this
+        after ``init()``. Both migration runners are idempotent and use the
+        shared auditable schema-version ledger.
         """
-        return apply_phase3_migrations(self.db)
+        applied = apply_phase3_migrations(self.db)
+        applied.extend(apply_phase3_hardening(self.db))
+        return applied
 
     def add_event(self, kind: str, payload: str) -> int:
         with self.db:

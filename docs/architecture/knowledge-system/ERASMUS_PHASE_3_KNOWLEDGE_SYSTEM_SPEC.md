@@ -9,7 +9,7 @@
 
 ## 0. Repository and implementation boundary
 
-This package closes the design gaps for Erasmus Phase 3. It defines the target architecture, contracts, lifecycle, reconciliation rules, persistence boundaries, projections, security controls, tests, and staged evolution of the governed knowledge system.
+This package defines the currently declared target architecture, contracts, lifecycle, reconciliation rules, persistence boundaries, projections, security controls, tests, and staged evolution of the governed knowledge system. Static coverage does not prove the future runtime implementation or exclude defects that executable review later discovers.
 
 Landing this design does **not** activate Phase 3 or authorize an implementation. Every roadmap increment requires a separately bounded mission with exact acceptance criteria, typed contracts, deterministic and negative tests, migration and rollback evidence, independent review, and a 10th-Man countercase.
 
@@ -89,7 +89,7 @@ The following invariants are immutable requirements for every Phase 3 increment:
 10. **Stable identity survives presentation changes.** Concept identity is independent of filename, title, path, and embedding.
 11. **Scope precedes retrieval.** Authorization and knowledge scope are applied before semantic ranking and before context assembly.
 12. **Staleness is explicit.** Stale knowledge is revalidated, qualified, or withheld according to policy; freshness is not inferred from retrieval rank.
-13. **Rollback is designed before promotion.** Every canonical mutation has a prior snapshot and a deterministic withdrawal or supersession path.
+13. **Rollback is designed before promotion.** Every current-channel selection has a prior receipted snapshot and a deterministic withdrawal or supersession path.
 14. **No unbounded retries.** Ingestion, reconciliation, review, publication, and projection jobs have retry budgets and terminal failure states.
 15. **No Phase 3 monolith.** Each component owns one record class or transition family behind versioned contracts.
 
@@ -245,9 +245,11 @@ It produces:
 - prior-path aliases;
 - a complete snapshot manifest and content digests.
 
-### 5.10 Atomic OKF publisher
+### 5.10 Receipt-first append-only OKF publisher
 
-The publisher writes to a new temporary snapshot directory, validates every document and link, computes a Merkle-style manifest digest, records a publication receipt, and atomically swaps the `current` pointer only after all gates pass.
+The publisher follows the intent/artifact/receipt/channel-selection protocol in the storage specification. A `new_snapshot` intent writes and validates two temporary renders, inserts one artifact/membership set with its immutable `snapshot_sequence`, installs one immutable directory on the same filesystem, commits a materialization receipt, and only then replaces the channel pointer. A rollback/reselection intent increments `attempt_sequence`, verifies an existing same-channel snapshot and original materialization receipt, commits a new reselection receipt, and advances `pointer_generation` without rendering, installing, or reinserting the artifact. Filesystem and SQLite operations are ordered and recoverable, never described as one cross-resource atomic transaction.
+
+First publication is an explicit bootstrap: no pointer, no selection event, logical pointer generation 0, and non-serving. The first receipt declares generation 1 before the absent pointer is compare-and-swapped. `attempt_sequence`, immutable `snapshot_sequence`, and `pointer_generation` are separate machine fields and are never inferred from one another.
 
 Published snapshot directories are immutable. Corrections create a new snapshot; they do not edit history in place.
 
@@ -266,7 +268,7 @@ Each projection records source snapshot ID, builder version, model/index identit
 
 ### 5.12 Retrieval and context broker
 
-The broker is the only supported path from knowledge projections into agent context. It applies scope, lifecycle, freshness, contradiction, and evidence filters before returning a bounded evidence packet.
+The broker is the only supported path from knowledge projections into agent context. It selects an authorized channel, validates its exact receipted current pointer and snapshot membership, then applies directives, scope, freshness, contradiction, and evidence constraints before returning a bounded evidence packet. Internal lifecycle is metadata/quality input, never channel authorization.
 
 It returns claims and source references, not an unqualified text blob.
 
@@ -294,9 +296,11 @@ Authoritative dependency and `KnowledgeUseReceipt` records support bounded downs
 
 An authorized `ServingDirective` can immediately qualify, exclude, block, or suspend affected content per channel before a corrected immutable snapshot is ready. Directives are applied before content reaches model context or cache; they never rewrite claim truth state or historical snapshots.
 
+Minimum invalidation and append-only directive supersession is a hard prerequisite to the first current publication and retrieval. Full dependency traversal and downstream impact analysis remain staged later.
+
 The complete model is defined in [`UNCERTAINTY_IMPACT_AND_SERVING_CONTROLS.md`](UNCERTAINTY_IMPACT_AND_SERVING_CONTROLS.md).
 
-## 6. Four distinct state planes
+## 6. Distinct internal and publication state planes
 
 ### 6.1 Candidate disposition
 
@@ -337,7 +341,7 @@ Claim truth state remains the existing ledger vocabulary:
 
 Phase 3 may add typed metadata and policy around these states but must not silently reinterpret them.
 
-### 6.4 Concept publication lifecycle
+### 6.4 Internal concept lifecycle
 
 Concept lifecycle describes publication readiness, not truth:
 
@@ -345,23 +349,27 @@ Concept lifecycle describes publication readiness, not truth:
 - `reviewed`
 - `validated`
 - `contested`
-- `canonical`
 - `superseded`
 - `rejected`
 - `deprecated`
 
-A canonical concept may contain a clearly marked contested claim. A concept is not automatically rejected because one claim is contradicted.
+Publication does not change this lifecycle. A validated concept may be current in one channel, historical in another, and unpublished in a third. A published concept may contain a clearly marked contested claim when channel policy permits it.
 
 ### 6.5 Snapshot state
 
-Snapshots move through:
+Append-only snapshot events move through:
 
-- `building`
+- `prepared`
 - `validated`
 - `approved`
-- `published`
-- `withdrawn`
+- `materialized`
 - `failed`
+
+Receipts record terminal publication attempts; channel-selection events record activation, rollback, and reselection. These do not mutate artifact state.
+
+### 6.6 Channel publication state
+
+`unpublished`, `current`, `historical`, and `withdrawn` are derived per `(channel_id, receipted snapshot_id, snapshot membership)`. This relation is not a global concept transition.
 
 ## 7. Identity and versioning
 
@@ -454,10 +462,10 @@ No authority is inherited by implication. Capabilities declare the exact require
 
 - `provisional -> reviewed`: independent reviewer required.
 - `reviewed -> validated`: deterministic validators and evidence-sufficiency policy required.
-- `validated -> canonical`, routine: may be automated only when policy explicitly allows it, all sources are available, no unresolved contradiction exists, and generation/review actors are independent.
-- `validated -> canonical`, consequential: human approval and 10th-Man review required.
+- Validated-revision publication, routine: may be automated only when policy explicitly allows it, all sources are available, no unresolved contradiction exists, and generation/review actors are independent.
+- Validated-revision publication, consequential: human approval and 10th-Man review required.
 - Any protected-state publication: explicit human approval, security/privacy review, and dual-control policy required.
-- `canonical -> superseded`, `withdrawn`, or `deprecated`: evidence, impact analysis, replacement or withdrawal reason, and publication rollback point required.
+- Supersession, withdrawal, or deprecation: evidence, impact analysis, replacement or withdrawal reason, and per-channel publication rollback point required.
 
 ## 9. OKF v0.2 publication profile
 
@@ -488,10 +496,12 @@ erasmus:
   profile: erasmus.knowledge-concept/v1
   revision: 7
   revision_id: urn:erasmus:concept-revision:...
+  channel_id: urn:erasmus:publication-channel:private-default
   snapshot_id: urn:erasmus:snapshot:...
   claim_ids:
     - urn:erasmus:claim:...
-  lifecycle: canonical
+  lifecycle: validated
+  channel_publication_state: current
   risk_class: routine
   prior_paths: []
 ---
@@ -587,13 +597,15 @@ The system fails closed when:
 - Ingestion runs and reconciliation jobs are resumable by idempotency key.
 - Consequential database transitions commit atomically.
 - Publication writes into a new temporary directory and never edits the active snapshot.
-- The `current` pointer changes only after receipt persistence.
-- On restart, unfinished `building` snapshots are validated or marked `failed`; they never become current implicitly.
+- The `current` pointer changes only after its exact success receipt is durably committed; an unreceipted pointer is invalid and non-serving.
+- Snapshot, receipt, selection, and evidence-packet receipt state is append-only and ordered by global `event_seq`; timestamps never decide recovery.
+- Bootstrap recovery never requires or restores a nonexistent prior receipt: before generation 1 it remains non-serving, resumes/fails the first intent, activates only while absence/generation 0 still matches, or confirms an already receipted generation-1 pointer.
+- Later recovery deterministically resumes or records failure, completes a safe receipt-first pointer change, confirms an already safe pointer, or reconstructs the last confirmed receipted pointer.
 - Projection jobs restart from the last committed snapshot/projection checkpoint.
 
 ### 12.3 Rollback
 
-Publication rollback selects a previously published immutable snapshot and records a new rollback publication event. It does not delete the failed snapshot.
+Publication rollback creates a `reselect_existing` intent and new reselection receipt targeting a previously materialized same-channel snapshot, advances `attempt_sequence` and `pointer_generation`, and appends a rollback channel-selection event. It retains the target's original `snapshot_sequence`; it does not insert snapshot/member rows, render/install a directory, or delete/mutate either snapshot.
 
 Operational rollback uses compensating transitions, supersession, or withdrawal records; append-only history remains intact.
 
@@ -619,7 +631,9 @@ Detailed requirements are in [`SECURITY_PRIVACY_AND_GOVERNANCE.md`](SECURITY_PRI
 A retrieval response is an evidence packet, not prose. It contains:
 
 - query and normalized constraints;
-- snapshot ID;
+- channel and snapshot IDs plus immutable `snapshot_sequence`;
+- exact publication receipt and selected `pointer_generation`;
+- directive-set digest, `as_known_event_seq`, and packet `event_seq`;
 - claim ID;
 - concept ID and path;
 - selected text;
@@ -671,9 +685,9 @@ crates/
 
 No Tauri surface is authorized until backend contracts, migrations, and headless commands are stable. Tauri remains a read/control surface rather than knowledge authority.
 
-## 17. Definition of design completeness
+## 17. Design-package coverage
 
-This Phase 3 design is complete when the repository contains and cross-links:
+This documentation package covers the declared Phase 3 contract surfaces when the repository contains and cross-links:
 
 1. This architecture specification.
 2. [`CONTRACT_CATALOGUE.md`](CONTRACT_CATALOGUE.md).
@@ -691,6 +705,8 @@ This Phase 3 design is complete when the repository contains and cross-links:
 14. [`../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md`](../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md).
 15. [`../../adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md`](../../adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md).
 16. Experimental, non-runtime schema seeds under [`schemas/`](schemas/).
+
+This is static design/schema coverage only. It does not prove runtime crash safety, concurrency, recovery, filesystem durability, migration correctness, serving enforcement, or cross-platform behavior; each implementing mission must supply that executable evidence.
 
 ## 18. 10th-Man countercase
 

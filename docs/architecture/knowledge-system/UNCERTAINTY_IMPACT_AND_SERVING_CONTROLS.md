@@ -55,6 +55,7 @@ Uncertainty is represented by typed records, never one universal scalar.
   "applicability": {},
   "status": "current",
   "created_by": "Actor",
+  "event_seq": 11,
   "created_at": "ISO-8601",
   "supersedes_uncertainty_id": null
 }
@@ -129,6 +130,7 @@ Impact propagation cannot rely solely on a derived graph projection. Consequenti
   "qualifiers": {},
   "decision_id": "...",
   "evidence_ids": [],
+  "event_seq": 12,
   "created_at": "ISO-8601",
   "supersedes_dependency_id": null
 }
@@ -178,6 +180,7 @@ A system cannot assess downstream impact unless it knows which governed knowledg
   "usage_class": "consulted",
   "materiality": "material",
   "actor": "Actor",
+  "event_seq": 13,
   "created_at": "ISO-8601"
 }
 ```
@@ -262,6 +265,7 @@ An invalidation event does not delete or rewrite the affected records.
   "recommended_directives": [],
   "required_missions": [],
   "created_by": "process:erasmus-impact-analyzer/1.0.0",
+  "event_seq": 14,
   "created_at": "ISO-8601"
 }
 ```
@@ -306,6 +310,8 @@ A serving directive is an immediate operational control applied after authorizat
   "effective_at": "ISO-8601",
   "expires_at": null,
   "replacement_snapshot_id": null,
+  "supersedes_directive_id": null,
+  "event_seq": 41,
   "created_at": "ISO-8601"
 }
 ```
@@ -332,7 +338,9 @@ The most restrictive applicable active directive wins.
 - A directive requires exact scope/channel and policy evaluation.
 - A source, candidate, model, or retrieved document cannot create a directive.
 - Protected emergency directives require an authorized governor/security capability; they may precede full impact analysis but must reference a bounded incident and expiry/review condition.
-- A directive is removed only through expiration or a superseding directive with evidence.
+- `supersedes_directive_id` is required and null only for an initial directive. Every replacement or retirement names exactly one prior directive with the same subject/channel/scope, and the chain must be acyclic.
+- An authorized `allow` successor may retire an emergency restriction; it does not delete or mutate the prior directive.
+- The active directive is the unsuperseded leaf ordered by global `event_seq`. Multiple conflicting leaves, a cycle, a scope mismatch, or unavailable directive resolution fails closed.
 - Context packets include active qualification directive IDs and warnings.
 - Excluded/blocked records must not enter model context or caches.
 - Cache keys include the active directive-set digest.
@@ -393,9 +401,12 @@ A synthesis cannot convert an interval into a point estimate, categorical ambigu
 
 ## 15. Storage targets
 
+Every authoritative row below explicitly carries a required unique `event_seq` foreign key to the one global `knowledge_events` sequence and commits with that event.
+
 ```sql
 CREATE TABLE knowledge_uncertainties (
     uncertainty_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     subject_id TEXT NOT NULL,
     uncertainty_kind TEXT NOT NULL,
     representation_json TEXT NOT NULL,
@@ -410,8 +421,27 @@ CREATE TABLE knowledge_uncertainties (
     supersedes_uncertainty_id TEXT
 );
 
+CREATE TABLE knowledge_materiality_assessments (
+    assessment_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
+    subject_ids_json TEXT NOT NULL,
+    intended_use_json TEXT NOT NULL,
+    risk_class TEXT NOT NULL,
+    possible_effect_json TEXT NOT NULL,
+    reversibility TEXT NOT NULL,
+    detectability TEXT NOT NULL,
+    affected_channel_ids_json TEXT NOT NULL,
+    assessment TEXT NOT NULL,
+    evidence_ids_json TEXT NOT NULL,
+    policy_evaluation_id TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    review_ids_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE knowledge_dependencies (
     dependency_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     from_id TEXT NOT NULL,
     dependency_type TEXT NOT NULL,
     to_id TEXT NOT NULL,
@@ -425,6 +455,7 @@ CREATE TABLE knowledge_dependencies (
 
 CREATE TABLE knowledge_use_receipts (
     use_receipt_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     mission_id INTEGER,
     decision_or_action_id TEXT,
     evidence_packet_id TEXT NOT NULL,
@@ -442,6 +473,7 @@ CREATE TABLE knowledge_use_receipts (
 
 CREATE TABLE knowledge_invalidation_events (
     invalidation_event_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     trigger_kind TEXT NOT NULL,
     affected_ids_json TEXT NOT NULL,
     evidence_ids_json TEXT NOT NULL,
@@ -459,6 +491,7 @@ CREATE TABLE knowledge_invalidation_events (
 
 CREATE TABLE knowledge_impact_analyses (
     impact_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     invalidation_event_id TEXT NOT NULL,
     analysis_json TEXT NOT NULL,
     created_by TEXT NOT NULL,
@@ -483,7 +516,11 @@ CREATE TABLE knowledge_serving_directives (
     effective_at TEXT NOT NULL,
     expires_at TEXT,
     replacement_snapshot_id TEXT,
-    created_at TEXT NOT NULL
+    supersedes_directive_id TEXT,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(supersedes_directive_id)
+        REFERENCES knowledge_serving_directives(directive_id)
 );
 ```
 
@@ -492,8 +529,8 @@ Base records are append-only. Active/current directives and dependencies are pro
 ## 16. Roadmap placement
 
 - Typed uncertainty and authoritative dependencies begin with P3.3/P3.7 as relevant records are introduced.
-- Knowledge-use receipts and serving-directive enforcement are mandatory before P3.10 serves canonical evidence to agents.
-- Freshness, invalidation, impact propagation, and downstream notification are completed in P3.12.
+- Minimum invalidation events and append-only serving-directive apply/supersede/suspend behavior are completed in P3.8B as a hard prerequisite to P3.9 current selection and P3.10 retrieval.
+- Freshness, authoritative dependency/use receipts, full impact propagation, and downstream notification are completed in P3.12.
 - Continuous maintenance in P3.13 consumes invalidation and impact queues.
 - Routing integration in P3.14 records knowledge-use receipts for material route decisions.
 
@@ -534,3 +571,4 @@ A promoted implementation must prove:
 15. Downstream notifications distinguish knowledge that was material, merely presented, or explicitly rejected.
 16. Corrected publication and revalidation retire emergency directives without deleting the incident history.
 17. Consequential synthesis and retrieval preserve material uncertainty and omitted-material notices.
+18. Directive supersession is same-scope, acyclic, totally ordered by `event_seq`, and conflicting active leaves fail closed.

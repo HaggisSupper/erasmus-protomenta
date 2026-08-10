@@ -11,7 +11,11 @@
     {"$ref": "#/$defs/reconciliationDecision"},
     {"$ref": "#/$defs/conceptRevision"},
     {"$ref": "#/$defs/reviewRecord"},
+    {"$ref": "#/$defs/publicationIntent"},
     {"$ref": "#/$defs/canonicalSnapshot"},
+    {"$ref": "#/$defs/snapshotEvent"},
+    {"$ref": "#/$defs/publicationReceipt"},
+    {"$ref": "#/$defs/channelSelectionEvent"},
     {"$ref": "#/$defs/projectionManifest"},
     {"$ref": "#/$defs/evidencePacket"},
     {"$ref": "#/$defs/knowledgeMutationCommand"}
@@ -28,6 +32,13 @@
     "timestamp": {
       "type": "string",
       "format": "date-time"
+    },
+    "eventSequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "channelPublicationState": {
+      "enum": ["unpublished", "current", "historical", "withdrawn"]
     },
     "digest": {
       "type": "object",
@@ -65,7 +76,7 @@
       "required": [
         "contract", "source_id", "digest", "media_type", "byte_size",
         "source_kind", "locator", "scope", "acquired_at", "acquired_by",
-        "storage_state", "metadata"
+        "storage_state", "metadata", "event_seq"
       ],
       "properties": {
         "contract": {"const": "erasmus.source-artifact/v1"},
@@ -84,7 +95,8 @@
         "acquired_at": {"$ref": "#/$defs/timestamp"},
         "acquired_by": {"$ref": "#/$defs/actor"},
         "storage_state": {"enum": ["available", "external", "tombstoned", "removed"]},
-        "metadata": {"type": "object"}
+        "metadata": {"type": "object"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"}
       },
       "additionalProperties": false
     },
@@ -106,7 +118,7 @@
       "type": "object",
       "required": [
         "contract", "span_id", "source_id", "coordinate", "text_digest",
-        "extraction_receipt_id", "scope"
+        "extraction_receipt_id", "scope", "event_seq"
       ],
       "properties": {
         "contract": {"const": "erasmus.source-span/v1"},
@@ -117,7 +129,8 @@
         "extracted_text": {"type": ["string", "null"]},
         "protected_ref": {"type": ["string", "null"]},
         "extraction_receipt_id": {"$ref": "#/$defs/stableId"},
-        "scope": {"$ref": "#/$defs/scope"}
+        "scope": {"$ref": "#/$defs/scope"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"}
       },
       "oneOf": [
         {
@@ -140,7 +153,7 @@
       "required": [
         "contract", "candidate_claim_id", "candidate_id", "statement",
         "qualifiers", "source_span_ids", "scope", "risk_class",
-        "content_digest", "created_at"
+        "content_digest", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.candidate-claim/v1"},
@@ -160,6 +173,7 @@
         "scope": {"$ref": "#/$defs/scope"},
         "risk_class": {"$ref": "#/$defs/riskClass"},
         "content_digest": {"$ref": "#/$defs/digest"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -177,7 +191,7 @@
         "candidate_claim_id", "target_claim_ids", "target_concept_ids",
         "evidence_ids", "review_ids", "policy_version", "actor",
         "authority", "mission_id", "idempotency_key", "structured_rationale",
-        "created_at"
+        "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.reconciliation-decision/v1"},
@@ -211,6 +225,7 @@
         "mission_id": {"type": "integer", "minimum": 1},
         "idempotency_key": {"type": "string", "minLength": 1},
         "structured_rationale": {"type": "string", "minLength": 1},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -221,7 +236,8 @@
         "contract", "revision_id", "concept_id", "revision_number",
         "title", "concept_type", "description", "tags", "claim_ids",
         "relationship_ids", "applicability", "exclusions", "okf_path",
-        "rendering_profile", "content_digest", "generated_by", "generated_at"
+        "rendering_profile", "content_digest", "generated_by", "generated_at",
+        "event_seq"
       ],
       "properties": {
         "contract": {"const": "erasmus.concept-revision/v1"},
@@ -262,7 +278,8 @@
         "rendering_profile": {"type": "string", "minLength": 1},
         "content_digest": {"$ref": "#/$defs/digest"},
         "generated_by": {"$ref": "#/$defs/actor"},
-        "generated_at": {"$ref": "#/$defs/timestamp"}
+        "generated_at": {"$ref": "#/$defs/timestamp"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"}
       },
       "additionalProperties": false
     },
@@ -271,7 +288,8 @@
       "required": [
         "contract", "review_id", "review_type", "subject_ids", "reviewer",
         "independence_key", "inputs_digest", "verdict", "findings",
-        "required_actions", "evidence_ids", "policy_version", "created_at"
+        "required_actions", "evidence_ids", "policy_version", "event_seq",
+        "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.knowledge-review/v1"},
@@ -302,20 +320,183 @@
           "uniqueItems": true
         },
         "policy_version": {"type": "string", "minLength": 1},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
+      "additionalProperties": false
+    },
+    "pointerPayload": {
+      "type": "object",
+      "required": [
+        "channel_id", "snapshot_id", "snapshot_sequence", "receipt_id",
+        "intent_id", "attempt_sequence", "pointer_generation",
+        "manifest_digest", "policy_id", "policy_version",
+        "registry_snapshot_id"
+      ],
+      "properties": {
+        "channel_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_sequence": {"type": "integer", "minimum": 1},
+        "receipt_id": {"$ref": "#/$defs/stableId"},
+        "intent_id": {"$ref": "#/$defs/stableId"},
+        "attempt_sequence": {"type": "integer", "minimum": 1},
+        "pointer_generation": {"type": "integer", "minimum": 1},
+        "manifest_digest": {"$ref": "#/$defs/digest"},
+        "policy_id": {"$ref": "#/$defs/stableId"},
+        "policy_version": {"type": "string", "minLength": 1},
+        "registry_snapshot_id": {"$ref": "#/$defs/stableId"}
+      },
+      "additionalProperties": false
+    },
+    "priorPointerPayload": {
+      "type": "object",
+      "required": [
+        "channel_id", "snapshot_id", "snapshot_sequence", "receipt_id",
+        "intent_id", "attempt_sequence", "manifest_digest", "policy_id",
+        "policy_version", "registry_snapshot_id"
+      ],
+      "properties": {
+        "channel_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_sequence": {"type": "integer", "minimum": 1},
+        "receipt_id": {"$ref": "#/$defs/stableId"},
+        "intent_id": {"$ref": "#/$defs/stableId"},
+        "attempt_sequence": {"type": "integer", "minimum": 1},
+        "manifest_digest": {"$ref": "#/$defs/digest"},
+        "policy_id": {"$ref": "#/$defs/stableId"},
+        "policy_version": {"type": "string", "minLength": 1},
+        "registry_snapshot_id": {"$ref": "#/$defs/stableId"}
+      },
+      "additionalProperties": false
+    },
+    "implementationIdentity": {
+      "type": "object",
+      "required": ["id", "version", "digest"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "digest": {"$ref": "#/$defs/digest"}
+      },
+      "additionalProperties": false
+    },
+    "publicationEvidence": {
+      "type": "object",
+      "required": ["input_digest", "policy_evaluation_id", "review_ids"],
+      "properties": {
+        "input_digest": {"$ref": "#/$defs/digest"},
+        "policy_evaluation_id": {"$ref": "#/$defs/stableId"},
+        "review_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "publicationFailure": {
+      "type": "object",
+      "required": [
+        "code", "message", "details", "retryable", "action", "related_ids"
+      ],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1},
+        "details": {"type": "object"},
+        "retryable": {"type": "boolean"},
+        "action": {"type": "string", "minLength": 1},
+        "related_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/stableId"},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "publicationIntent": {
+      "type": "object",
+      "required": [
+        "contract", "intent_id", "channel_id", "attempt_sequence",
+        "intent_kind", "selection_kind", "target_snapshot_id",
+        "snapshot_sequence", "expected_prior_pointer_payload",
+        "expected_prior_pointer_generation", "exact_plan",
+        "target_materialization_receipt_id", "event_seq", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.publication-intent/v1"},
+        "intent_id": {"$ref": "#/$defs/stableId"},
+        "channel_id": {"$ref": "#/$defs/stableId"},
+        "attempt_sequence": {"type": "integer", "minimum": 1},
+        "intent_kind": {"enum": ["new_snapshot", "reselect_existing"]},
+        "selection_kind": {"enum": ["publish", "rollback", "reselect"]},
+        "target_snapshot_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_sequence": {"type": "integer", "minimum": 1},
+        "expected_prior_pointer_payload": {
+          "oneOf": [
+            {"$ref": "#/$defs/priorPointerPayload"},
+            {"type": "null"}
+          ]
+        },
+        "expected_prior_pointer_generation": {"type": "integer", "minimum": 0},
+        "exact_plan": {"type": ["object", "null"]},
+        "target_materialization_receipt_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["expected_prior_pointer_payload"],
+            "properties": {"expected_prior_pointer_payload": {"type": "null"}}
+          },
+          "then": {
+            "properties": {"expected_prior_pointer_generation": {"const": 0}}
+          },
+          "else": {
+            "properties": {"expected_prior_pointer_generation": {"minimum": 1}}
+          }
+        },
+        {
+          "if": {
+            "required": ["intent_kind"],
+            "properties": {"intent_kind": {"const": "new_snapshot"}}
+          },
+          "then": {
+            "properties": {
+              "selection_kind": {"const": "publish"},
+              "exact_plan": {"type": "object", "minProperties": 1},
+              "target_materialization_receipt_id": {"type": "null"}
+            }
+          },
+          "else": {
+            "properties": {
+              "selection_kind": {"enum": ["rollback", "reselect"]},
+              "exact_plan": {"type": "null"},
+              "target_materialization_receipt_id": {"$ref": "#/$defs/stableId"}
+            }
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "canonicalSnapshot": {
       "type": "object",
       "required": [
-        "contract", "snapshot_id", "sequence", "scope", "snapshot_state",
-        "root_path", "concept_revision_ids", "created_at"
+        "contract", "snapshot_id", "creating_intent_id", "channel_id",
+        "snapshot_sequence",
+        "scope", "manifest_digest", "root_path", "concept_revision_ids",
+        "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.canonical-snapshot/v1"},
         "snapshot_id": {"$ref": "#/$defs/stableId"},
-        "sequence": {"type": "integer", "minimum": 1},
+        "creating_intent_id": {"$ref": "#/$defs/stableId"},
+        "channel_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_sequence": {"type": "integer", "minimum": 1},
         "parent_snapshot_id": {
           "oneOf": [
             {"$ref": "#/$defs/stableId"},
@@ -323,42 +504,217 @@
           ]
         },
         "scope": {"$ref": "#/$defs/scope"},
-        "snapshot_state": {
-          "enum": ["building", "validated", "approved", "published", "withdrawn", "failed"]
-        },
-        "manifest_digest": {
-          "oneOf": [
-            {"$ref": "#/$defs/digest"},
-            {"type": "null"}
-          ]
-        },
+        "manifest_digest": {"$ref": "#/$defs/digest"},
         "root_path": {"type": "string", "minLength": 1},
         "concept_revision_ids": {
           "type": "array",
           "items": {"$ref": "#/$defs/stableId"},
           "uniqueItems": true
         },
-        "created_at": {"$ref": "#/$defs/timestamp"},
-        "published_at": {
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "snapshotEventState": {
+      "enum": [
+        "prepared", "validated", "approved", "materialized", "failed"
+      ]
+    },
+    "snapshotEvent": {
+      "type": "object",
+      "required": [
+        "contract", "snapshot_event_id", "creating_intent_id", "snapshot_id",
+        "snapshot_sequence", "channel_id", "prior_state", "new_state",
+        "details", "event_seq", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.snapshot-event/v1"},
+        "snapshot_event_id": {"$ref": "#/$defs/stableId"},
+        "creating_intent_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_sequence": {"type": "integer", "minimum": 1},
+        "channel_id": {"$ref": "#/$defs/stableId"},
+        "prior_state": {
           "oneOf": [
-            {"$ref": "#/$defs/timestamp"},
+            {"$ref": "#/$defs/snapshotEventState"},
             {"type": "null"}
           ]
         },
-        "withdrawn_at": {
+        "new_state": {"$ref": "#/$defs/snapshotEventState"},
+        "details": {"type": "object"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    },
+    "publicationReceipt": {
+      "type": "object",
+      "required": [
+        "contract", "receipt_id", "intent_id", "receipt_kind", "channel_id",
+        "target_snapshot_id", "snapshot_sequence", "attempt_sequence",
+        "expected_prior_pointer_generation", "next_pointer_generation",
+        "publisher", "validator", "results", "evidence", "manifest_digest",
+        "pointer_payload_digest", "receipt_status", "failure", "event_seq",
+        "completed_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.publication-receipt/v1"},
+        "receipt_id": {"$ref": "#/$defs/stableId"},
+        "intent_id": {"$ref": "#/$defs/stableId"},
+        "receipt_kind": {"enum": ["materialization", "reselection"]},
+        "channel_id": {"$ref": "#/$defs/stableId"},
+        "target_snapshot_id": {
           "oneOf": [
-            {"$ref": "#/$defs/timestamp"},
+            {"$ref": "#/$defs/stableId"},
             {"type": "null"}
           ]
-        }
+        },
+        "snapshot_sequence": {"type": ["integer", "null"], "minimum": 1},
+        "attempt_sequence": {"type": "integer", "minimum": 1},
+        "expected_prior_pointer_generation": {"type": "integer", "minimum": 0},
+        "next_pointer_generation": {"type": ["integer", "null"], "minimum": 1},
+        "publisher": {"$ref": "#/$defs/implementationIdentity"},
+        "validator": {"$ref": "#/$defs/implementationIdentity"},
+        "results": {"type": "object"},
+        "evidence": {"$ref": "#/$defs/publicationEvidence"},
+        "manifest_digest": {
+          "oneOf": [
+            {"$ref": "#/$defs/digest"},
+            {"type": "null"}
+          ]
+        },
+        "pointer_payload_digest": {
+          "oneOf": [
+            {"$ref": "#/$defs/digest"},
+            {"type": "null"}
+          ]
+        },
+        "receipt_status": {"enum": ["success", "failure"]},
+        "failure": {
+          "oneOf": [
+            {"$ref": "#/$defs/publicationFailure"},
+            {"type": "null"}
+          ]
+        },
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
+        "completed_at": {"$ref": "#/$defs/timestamp"}
       },
+      "allOf": [
+        {
+          "if": {
+            "required": ["receipt_status"],
+            "properties": {"receipt_status": {"const": "success"}}
+          },
+          "then": {
+            "properties": {
+              "target_snapshot_id": {"$ref": "#/$defs/stableId"},
+              "snapshot_sequence": {"type": "integer", "minimum": 1},
+              "next_pointer_generation": {"type": "integer", "minimum": 1},
+              "manifest_digest": {"$ref": "#/$defs/digest"},
+              "pointer_payload_digest": {"$ref": "#/$defs/digest"},
+              "failure": {"type": "null"}
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "expected_prior_pointer_generation": {"const": 0}
+                  }
+                },
+                "then": {
+                  "properties": {"next_pointer_generation": {"const": 1}}
+                },
+                "else": {
+                  "properties": {"next_pointer_generation": {"minimum": 2}}
+                }
+              }
+            ]
+          },
+          "else": {
+            "properties": {
+              "next_pointer_generation": {"type": "null"},
+              "failure": {"$ref": "#/$defs/publicationFailure"}
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "target_snapshot_id": {"type": "null"},
+                  "snapshot_sequence": {"type": "null"}
+                }
+              },
+              {
+                "properties": {
+                  "target_snapshot_id": {"$ref": "#/$defs/stableId"},
+                  "snapshot_sequence": {"type": "integer", "minimum": 1}
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "channelSelectionEvent": {
+      "type": "object",
+      "required": [
+        "contract", "selection_event_id", "intent_id", "channel_id",
+        "snapshot_id", "snapshot_sequence", "publication_receipt_id",
+        "publication_receipt_status", "attempt_sequence", "selection_kind", "prior_snapshot_id",
+        "prior_pointer_generation", "pointer_generation", "pointer_digest",
+        "event_seq", "created_at"
+      ],
+      "properties": {
+        "contract": {"const": "erasmus.channel-selection-event/v1"},
+        "selection_event_id": {"$ref": "#/$defs/stableId"},
+        "intent_id": {"$ref": "#/$defs/stableId"},
+        "channel_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_sequence": {"type": "integer", "minimum": 1},
+        "publication_receipt_id": {"$ref": "#/$defs/stableId"},
+        "publication_receipt_status": {"const": "success"},
+        "attempt_sequence": {"type": "integer", "minimum": 1},
+        "selection_kind": {"enum": ["publish", "rollback", "reselect"]},
+        "prior_snapshot_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "prior_pointer_generation": {"type": "integer", "minimum": 0},
+        "pointer_generation": {"type": "integer", "minimum": 1},
+        "pointer_digest": {"$ref": "#/$defs/digest"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
+        "created_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["prior_snapshot_id"],
+            "properties": {"prior_snapshot_id": {"type": "null"}}
+          },
+          "then": {
+            "properties": {
+              "prior_pointer_generation": {"const": 0},
+              "pointer_generation": {"const": 1}
+            }
+          },
+          "else": {
+            "properties": {
+              "prior_pointer_generation": {"minimum": 1},
+              "pointer_generation": {"minimum": 2}
+            }
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "projectionManifest": {
       "type": "object",
       "required": [
         "contract", "projection_id", "kind", "source_snapshot_id",
-        "builder", "configuration", "scope", "projection_state", "created_at"
+        "builder", "configuration", "scope", "projection_state", "event_seq",
+        "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.knowledge-projection/v1"},
@@ -376,6 +732,7 @@
             {"type": "null"}
           ]
         },
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"},
         "completed_at": {
           "oneOf": [
@@ -392,6 +749,7 @@
       "required": [
         "claim_id", "proposition_id", "concept_id", "concept_path",
         "selected_text", "epistemic_status", "concept_lifecycle",
+        "channel_publication_state",
         "freshness", "contested", "source_refs", "retrieval_features"
       ],
       "properties": {
@@ -408,10 +766,11 @@
         },
         "concept_lifecycle": {
           "enum": [
-            "provisional", "reviewed", "validated", "contested", "canonical",
+            "provisional", "reviewed", "validated", "contested",
             "superseded", "rejected", "deprecated"
           ]
         },
+        "channel_publication_state": {"$ref": "#/$defs/channelPublicationState"},
         "freshness": {
           "enum": ["current", "approaching_stale", "stale", "unknown", "source_unavailable"]
         },
@@ -429,14 +788,22 @@
     "evidencePacket": {
       "type": "object",
       "required": [
-        "contract", "packet_id", "request_id", "snapshot_id", "items",
-        "omitted", "budget", "created_at"
+        "contract", "packet_id", "request_id", "channel_id", "snapshot_id",
+        "snapshot_sequence", "publication_receipt_id", "pointer_generation",
+        "directive_set_digest", "as_known_event_seq", "items", "omitted",
+        "budget", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.evidence-packet/v1"},
         "packet_id": {"$ref": "#/$defs/stableId"},
         "request_id": {"$ref": "#/$defs/stableId"},
+        "channel_id": {"$ref": "#/$defs/stableId"},
         "snapshot_id": {"$ref": "#/$defs/stableId"},
+        "snapshot_sequence": {"type": "integer", "minimum": 1},
+        "publication_receipt_id": {"$ref": "#/$defs/stableId"},
+        "pointer_generation": {"type": "integer", "minimum": 1},
+        "directive_set_digest": {"$ref": "#/$defs/digest"},
+        "as_known_event_seq": {"$ref": "#/$defs/eventSequence"},
         "items": {
           "type": "array",
           "items": {"$ref": "#/$defs/evidencePacketItem"}
@@ -459,6 +826,7 @@
           },
           "additionalProperties": false
         },
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false

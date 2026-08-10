@@ -1,7 +1,7 @@
 # Erasmus Phase 3 Knowledge-System Design Package
 
 - **Version:** 1.0.0
-- **Status:** Complete target design; deferred and non-authorizing
+- **Status:** Accepted target contracts; deferred, non-authorizing, and runtime-unverified
 - **Draft schema registration:** Registered for design discovery, review, and validation
 - **Database migration:** None
 - **Runtime activation:** None
@@ -14,9 +14,11 @@ The draft Phase 3 schema set has been registered as an experimental, non-runtime
 
 No migration has been added. No policy, registry, candidate import, identity resolution, serving directive, canonical publication, or retrieval projection has been activated.
 
+Static design validation is not runtime evidence for crash safety, concurrency, recovery, filesystem durability, or cross-platform behavior. Each later implementing mission must provide executable fault, race, durability, migration, serving, rollback, and platform evidence.
+
 ## Documents
 
-1. [`ERASMUS_PHASE_3_KNOWLEDGE_SYSTEM_SPEC.md`](ERASMUS_PHASE_3_KNOWLEDGE_SYSTEM_SPEC.md) — complete architecture, invariants, components, identities, authorities, publication model, failure handling, and implementation boundaries.
+1. [`ERASMUS_PHASE_3_KNOWLEDGE_SYSTEM_SPEC.md`](ERASMUS_PHASE_3_KNOWLEDGE_SYSTEM_SPEC.md) — target architecture, invariants, components, identities, authorities, publication model, failure handling, and implementation boundaries.
 2. [`CONTRACT_CATALOGUE.md`](CONTRACT_CATALOGUE.md) — target record and capability contracts, field requirements, invariants, compatibility with the current ledger, and error taxonomy.
 3. [`STATE_MODEL.md`](STATE_MODEL.md) — normative separation of external Foundry status, candidate disposition, reconciliation action, ledger truth state, concept/synthesis lifecycle, question state, freshness, snapshot state, and projection state.
 4. [`KNOWLEDGE_LIFECYCLE_AND_RECONCILIATION.md`](KNOWLEDGE_LIFECYCLE_AND_RECONCILIATION.md) — legal transitions; reconciliation decision table; contradiction, evidence-independence, supersession, and promotion rules.
@@ -29,7 +31,7 @@ No migration has been added. No policy, registry, candidate import, identity res
 11. [`SECURITY_PRIVACY_AND_GOVERNANCE.md`](SECURITY_PRIVACY_AND_GOVERNANCE.md) — threat model, prompt-injection and poisoning defenses, source/parser security, least privilege, privacy scopes, publication protection, incident response, and security tests.
 12. [`TEST_AND_ACCEPTANCE_PLAN.md`](TEST_AND_ACCEPTANCE_PLAN.md) — fixture corpus, unit/contract/state/integration/recovery/security/retrieval tests, CI matrix, acceptance evidence, and complete-app definition of done.
 13. [`GLOSSARY.md`](GLOSSARY.md) — normative terminology separating evidence, claims, concepts, truth state, lifecycle, publication, and projections.
-14. [`DESIGN_TRACEABILITY_MATRIX.md`](DESIGN_TRACEABILITY_MATRIX.md) — maps every identified design gap to its normative document, contract/schema, roadmap increment, and required verification.
+14. [`DESIGN_TRACEABILITY_MATRIX.md`](DESIGN_TRACEABILITY_MATRIX.md) — maps declared design concerns to their normative document, contract/schema, roadmap increment, and still-required verification.
 
 ## Registered experimental non-runtime schema set
 
@@ -45,7 +47,7 @@ The schema files are registered draft design fixtures only. They are not importe
 ## Governing decisions and sequence
 
 - [`../../adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md`](../../adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md) fixes operational records, OKF publication, and projection authority boundaries.
-- [`../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md`](../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md) decomposes Phase 3 into independently reversible missions P3.0 through P3.14, including explicit policy/registry, identity-resolution, open-question/synthesis, temporal-consistency, and impact/serving-control requirements.
+- [`../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md`](../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md) decomposes Phase 3 into independently reversible missions P3.0 through P3.14, including the P3.8B minimum invalidation/serving prerequisite before publication and retrieval.
 - [`../okf-knowledge-foundry.md`](../okf-knowledge-foundry.md) defines the bounded PDF-to-draft-candidate seam implemented by PR #68.
 - [`../../DEVELOPMENT_TRACK.md`](../../DEVELOPMENT_TRACK.md) remains the governing development sequence.
 
@@ -69,7 +71,7 @@ authorization-aware serving directives and evidence packets
 knowledge-use receipts and downstream impact analysis
 ```
 
-The model may propose candidates, claims, identities, relationships, questions, and syntheses. It cannot grant authority, activate policy or registries, make final identity decisions, verify itself, close a question, apply a serving directive, mutate canonical state, or publish a snapshot.
+The model may propose candidates, claims, identities, relationships, questions, and syntheses. It cannot grant authority, activate policy or registries, make final identity decisions, verify itself, close a question, apply a serving directive, change current channel selection, or publish a snapshot.
 
 ## State terminology
 

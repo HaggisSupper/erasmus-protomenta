@@ -50,25 +50,27 @@ An omitted boundary is unbounded only when policy and the claim type permit it. 
 
 ### 2.3 Transaction time
 
-Every append-only operational record has:
+Every authoritative append-only Phase 3 record has:
 
-- a database sequence/event ID used for total ordering;
+- a required positive `event_seq` foreign key to the single SQLite `knowledge_events(event_seq INTEGER PRIMARY KEY AUTOINCREMENT)` order;
 - `recorded_at` in UTC;
 - transaction/command/decision ID.
 
-Wall-clock timestamps aid interpretation but do not establish commit order. Database sequence or append-only event ordering is authoritative for “as known by Erasmus.”
+The event and domain record commit in the same SQLite transaction. Wall-clock timestamps aid interpretation but do not establish commit order. Global `event_seq` alone is authoritative for “as known by Erasmus”; publication `attempt_sequence`, immutable artifact `snapshot_sequence`, pointer `pointer_generation`, and registry sequence are separate domain counters only.
 
 ### 2.4 Publication time
 
-Snapshots and channel pointers record:
+Publication records distinguish:
 
-- snapshot sequence per channel;
-- snapshot creation/validation/approval/publication times;
-- publication receipt ID;
-- current-pointer update sequence/time;
+- `attempt_sequence` for each channel-local intent/receipt attempt;
+- immutable `snapshot_sequence` allocated only on artifact creation;
+- `pointer_generation` allocated only on successful channel-pointer replacement;
+- snapshot creation/validation/approval/materialization times;
+- exact materialization/reselection receipt ID;
+- pointer update time;
 - withdrawal time where applicable.
 
-Publication time does not rewrite claim valid time or transaction history.
+Rollback can therefore select an older `snapshot_sequence` at a newer attempt and pointer generation. Publication time does not rewrite claim valid time or transaction history.
 
 ### 2.5 Projection time
 
@@ -176,13 +178,13 @@ Temporal applicability mode.
 
 Tables or views named `current_*` are derived from append-only records using:
 
-1. latest committed transition by sequence within the subject's state plane;
+1. `WHERE event_seq <= :as_known_sequence ORDER BY event_seq`, selecting the latest committed event within each subject's state plane;
 2. supersession/tombstone rules;
 3. scope and policy selection;
 4. no wall-clock last-write-wins;
 5. no model-generated timestamp precedence.
 
-A tie or missing sequence is an integrity error.
+A duplicate or missing `event_seq` is an integrity error. Timestamps are temporal facts, never ordering keys or tie-breakers. Records committed in one command transaction retain their allocated event order, while readers observe the transaction atomically.
 
 ## 7. Corrections and hindsight
 
@@ -220,7 +222,7 @@ Operational decisions may precede the next canonical snapshot. The system makes 
 
 ## 10. Concurrency and revision semantics
 
-Mutating commands include expected revision/sequence values for every affected current-state object.
+Mutating commands include exact expected revision values for every affected current-state object. Publication specifically compares the generation-free `expected_prior_pointer_payload` plus the separate authoritative `expected_prior_pointer_generation`; it never embeds a second generation or substitutes attempt/snapshot counters.
 
 - Stale expected revision fails before mutation.
 - No automatic rebase or last-write-wins occurs for epistemic records.
@@ -270,15 +272,16 @@ Policy defines how long source bytes, snapshots, operational records, use receip
 }
 ```
 
-The evidence packet records the normalized temporal query and exact database/snapshot/directive boundaries used.
+The evidence packet is an immutable authoritative retrieval receipt. It records its own global `event_seq`, the normalized temporal query's `as_known_event_seq` boundary, exact publication receipt, immutable snapshot counter, pointer generation, and directive-set digest. The as-known boundary is never later than the packet event.
 
 ## 14. Storage requirements
 
-- Every append-only Phase 3 table has an ordered creation/transition sequence in addition to timestamp.
+- Every authoritative append-only Phase 3 table has a required unique global `event_seq` reference in addition to timestamp; it is inserted with the event row in the same transaction.
 - Relevant claims, entities, aliases, policies, relationships, sources, and directives store valid/effective intervals where applicable.
-- Snapshot sequence is unique per publication channel.
+- Snapshot sequence is unique per publication channel and immutable per artifact; attempt sequence and pointer generation have their own channel-local uniqueness and never define historical order.
+- Evidence packets persist an event reference and as-known boundary in the same transaction as their canonical packet bytes/digest.
 - Use receipts record decision/action time and exact as-known snapshot/directive context.
-- Historical views are derived; no separate mutable historical truth table is created.
+- Historical views apply complete committed events in `event_seq` order up to the resolved boundary; no separate mutable historical truth table or timestamp tie-break is created.
 
 ## 15. Failure taxonomy additions
 

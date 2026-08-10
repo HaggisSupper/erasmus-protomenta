@@ -111,7 +111,7 @@ Adopt **Option B**.
 
 1. Content-addressed source artifacts are authoritative evidence bytes or immutable external evidence references.
 2. The existing epistemic ledger is authoritative for proposition truth state and evidence transitions.
-3. New append-only Phase 3 SQLite records are authoritative for candidates, reconciliation decisions, claim bindings, concept revisions, relationships, reviews, lifecycle transitions, snapshots, publication receipts, projection manifests, and freshness assessments.
+3. New append-only Phase 3 SQLite records are authoritative for candidates, reconciliation decisions, claim bindings, concept revisions, relationships, reviews, lifecycle transitions, publication intents, snapshots, publication receipts, channel-selection events, projection manifests, immutable evidence-packet retrieval receipts, and freshness assessments. Every authoritative append references the one global `knowledge_events.event_seq` order.
 4. An immutable OKF snapshot is the authoritative portable publication for that exact snapshot ID and scope.
 5. Each governed publication channel has its own mutable `current` pointer selecting one receipted published snapshot for that channel and scope; a pointer does not contain knowledge.
 6. FTS, vector, graph, cache, API, UI, and model-context representations are derived projections.
@@ -120,25 +120,26 @@ Adopt **Option B**.
 
 ## Publication protocol consequence
 
-Canonical publication requires:
+Canonical publication is channel-relative snapshot membership, not a global concept lifecycle. It requires this exact per-channel order:
 
-1. an approved exact `PublicationPlan`;
-2. rendering into a new temporary root;
-3. two-build deterministic comparison;
-4. OKF, link, source, privacy, secret, and digest validation;
-5. an approved snapshot state;
-6. immutable directory move;
-7. atomic current-pointer update;
-8. durable publication receipt;
-9. deterministic recovery if the process fails between pointer and receipt changes.
+1. a SQLite prepare transaction appends the exact intent, generation-free expected prior-pointer payload, and separate expected generation; bootstrap alone permits null/generation 0 when no pointer or selection exists;
+2. a new-snapshot intent renders two byte-identical roots, while rollback/reselection instead verifies an existing same-channel artifact and original materialization receipt;
+3. only new-snapshot approval inserts one immutable snapshot/member set and artifact events;
+4. only a new artifact is fsynced and atomically renamed on one filesystem, then reverified;
+5. a SQLite transaction commits a new materialization or reselection receipt and future pointer-payload digest;
+6. only then is the fsynced pointer temporary file atomically replaced and its directory fsynced;
+7. pointer verification appends the channel-selection/activation event;
+8. deterministic recovery handles every gap by event sequence, remains non-serving when bootstrap has no confirmed pointer, and reconstructs only a confirmed receipted pointer when one exists.
+
+SQLite and filesystem actions are not atomic together. Safety comes from receipt-before-pointer ordering: `current` must never reference an unreceipted snapshot. `attempt_sequence`, immutable `snapshot_sequence`, and `pointer_generation` are independent channel-local counters. Rollback/reselection advances attempt and pointer counters through a new intent/receipt/selection chain while retaining the target's original snapshot counter; it never reinserts members or artifacts.
 
 ## Retrieval consequence
 
-Retrieval must identify a publication channel, source snapshot, active policy/registry context, and authorized scope before querying projections. A result includes stable claim/concept/source IDs plus truth, lifecycle, freshness, and contradiction state. Projection scores are evidence about relevance only.
+Retrieval must identify a publication channel, verify its exact receipted pointer and snapshot membership, and resolve active policy/registry/directives and authorized scope before querying projections. Internal lifecycle is quality metadata, not channel authorization. Each returned evidence packet is an immutable event-ordered retrieval receipt recording the publication receipt, snapshot counter, pointer generation, directive-set digest, and as-known event boundary. Projection scores are evidence about relevance only.
 
 ## Immediate serving-control consequence
 
-Immutable snapshots remain historical publication authority, but authorized append-only serving directives may temporarily qualify, exclude, block, or suspend affected content per channel when a material invalidation is discovered before a corrected snapshot can be published. The directive set is part of retrieval authorization and cache identity. It cannot rewrite claim truth state or snapshot bytes.
+Immutable snapshots remain historical publication authority, but authorized append-only serving directives may temporarily qualify, exclude, block, or suspend affected content per channel when a material invalidation is discovered before a corrected snapshot can be published. Minimum invalidation/apply/supersede/suspend behavior is mandatory before first current selection or retrieval. `supersedes_directive_id` creates an acyclic same-scope chain ordered by global `event_seq`; conflicting active leaves fail closed. The directive set is part of publication selection, retrieval authorization, and cache identity. It cannot rewrite claim truth state or snapshot bytes.
 
 ## Human-authoring consequence
 
@@ -166,13 +167,13 @@ This is slower than direct editing but preserves identity, evidence, review, and
 ## Migration strategy
 
 1. Land design only.
-2. Add source registry and candidates without canonical state.
+2. Add source registry and candidates without changing any channel publication.
 3. Add observation-only comparison and reconciliation proposals.
 4. Add governed ledger binding.
 5. Add concept/revision records.
 6. Add review/lifecycle gates.
 7. Add preview publication.
-8. Enable atomic current pointer after failpoint tests.
+8. Enable receipt-first current pointer selection after every cross-resource failpoint test.
 9. Add lexical, then vector/graph projections.
 
 Each step is separately reversible as defined in the Phase 3 roadmap.
@@ -214,15 +215,16 @@ An implementation complies only when:
 - deleting every projection leaves authoritative knowledge intact;
 - two identical publication plans produce byte-identical snapshots;
 - direct mutation of published snapshots is detected;
-- current pointer references only a published snapshot with a success receipt;
+- current pointer references only a same-channel immutable snapshot with an already committed exact success receipt;
 - claim status is reconstructed from the existing ledger;
 - concept path rename preserves stable resource identity;
 - human edits enter through candidates;
 - scope filtering occurs before projection content is returned;
-- rollback selects a prior immutable snapshot without deleting audit history.
+- rollback selects a prior immutable snapshot without deleting audit history;
+- historical reconstruction uses global `event_seq`, never timestamp tie-breaking.
 
 ## 10th-Man countercase
 
 This decision could over-engineer personal knowledge by introducing operational records and publication snapshots where a Git-managed Markdown directory might be sufficient.
 
-The containment is staged implementation. Direct Markdown remains appropriate for manually maintained static knowledge. The operational architecture is promoted only when Erasmus must continuously reconcile model-produced candidates, claim-level evidence, contradictions, lifecycle, scope, and atomic publication. If those failures are not observed, later increments remain deferred.
+The containment is staged implementation. Direct Markdown remains appropriate for manually maintained static knowledge. The operational architecture is promoted only when Erasmus must continuously reconcile model-produced candidates, claim-level evidence, contradictions, lifecycle, scope, and crash-consistent publication. If those failures are not observed, later increments remain deferred.

@@ -18,6 +18,10 @@
       "type": "string",
       "format": "date-time"
     },
+    "eventSequence": {
+      "type": "integer",
+      "minimum": 1
+    },
     "timeInterval": {
       "type": "object",
       "required": ["from", "to", "semantics"],
@@ -127,7 +131,7 @@
         "normalized_temporal_scope", "transaction_boundary",
         "snapshot_id", "channel_id", "policy_id", "policy_version",
         "registry_snapshot_id", "directive_set_digest", "content_availability",
-        "created_at"
+        "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.historical-query-receipt/v1"},
@@ -171,6 +175,7 @@
         "content_availability": {
           "enum": ["complete", "partial", "metadata_only", "unavailable"]
         },
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false

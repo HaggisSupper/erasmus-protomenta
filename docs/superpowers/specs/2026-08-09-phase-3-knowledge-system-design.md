@@ -2,7 +2,7 @@
 
 ## Approval and scope
 
-The user directed Erasmus to fill all previously identified Phase 3 design gaps and fully specify the evolution from bounded Foundry candidates to governed canonical knowledge. This document records the resulting design decision and points to the complete architecture package.
+The user directed Erasmus to address the then-identified Phase 3 design gaps and specify the evolution from bounded Foundry candidates to governed canonical knowledge. This document records the resulting design decision and points to the static, non-runtime architecture package; later implementation and adversarial review remain authoritative evidence of runtime fitness.
 
 This is a documentation-only, non-authorizing increment. Implementation remains decomposed into separately bounded missions.
 
@@ -71,7 +71,7 @@ Use a graph database as the primary knowledge store. It supports relationships b
 
 - No placeholders or unresolved design decisions remain in the target architecture.
 - Candidate disposition, reconciliation action, ledger truth state, provisional concept/synthesis lifecycle, open-question state, freshness, projection state, and snapshot state are distinct.
-- Every canonical mutation has authority, evidence, review, transaction, idempotency, rollback, and audit requirements.
+- Every current-channel publication selection has authority, evidence, review, transaction, idempotency, rollback, and audit requirements.
 - Existing ledger and capability authorities are preserved.
 - The design is decomposed into P3.0–P3.14 rather than one implementation plan.
 - The schema seed is experimental and cannot be mistaken for a live registered contract.

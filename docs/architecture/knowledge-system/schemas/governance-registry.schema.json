@@ -27,6 +27,10 @@
       "type": "string",
       "format": "date-time"
     },
+    "eventSequence": {
+      "type": "integer",
+      "minimum": 1
+    },
     "semver": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
@@ -127,7 +131,7 @@
       "type": "object",
       "required": [
         "contract", "policy_id", "version", "policy_digest", "scope",
-        "status", "effective_at", "rules", "created_by", "created_at",
+        "status", "effective_at", "rules", "created_by", "event_seq", "created_at",
         "review_ids"
       ],
       "properties": {
@@ -167,6 +171,7 @@
           "items": {"$ref": "#/$defs/policyRule"}
         },
         "created_by": {"$ref": "#/$defs/actor"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"},
         "review_ids": {
           "type": "array",
@@ -184,7 +189,7 @@
         "policy_digest", "operation", "subject_ids", "request_digest",
         "matched_rule_ids", "decision", "required_authorities",
         "required_reviews", "required_approvals", "remaining_conditions",
-        "budgets", "reason_codes", "evaluated_by", "evaluated_at"
+        "budgets", "reason_codes", "evaluated_by", "event_seq", "evaluated_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.policy-evaluation/v1"},
@@ -217,6 +222,7 @@
         "budgets": {"type": "object"},
         "reason_codes": {"type": "array", "items": {"type": "string"}},
         "evaluated_by": {"$ref": "#/$defs/actor"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "evaluated_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -241,7 +247,7 @@
       "type": "object",
       "required": [
         "contract", "entity_id", "entity_type", "canonical_label", "scope",
-        "identifiers", "created_by", "created_at"
+        "identifiers", "created_by", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.entity/v1"},
@@ -254,6 +260,7 @@
           "items": {"$ref": "#/$defs/identifier"}
         },
         "created_by": {"$ref": "#/$defs/actor"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -263,7 +270,7 @@
       "required": [
         "contract", "alias_id", "entity_id", "alias", "normalized_alias",
         "alias_kind", "scope", "evidence_ids", "source_span_ids",
-        "created_by", "created_at"
+        "created_by", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.entity-alias/v1"},
@@ -281,6 +288,7 @@
         "evidence_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true},
         "source_span_ids": {"type": "array", "items": {"$ref": "#/$defs/stableId"}, "uniqueItems": true},
         "created_by": {"$ref": "#/$defs/actor"},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"},
         "supersedes_alias_id": {
           "oneOf": [
@@ -297,7 +305,8 @@
         "contract", "decision_id", "proposal_id", "relation",
         "source_entity_ids", "target_entity_ids", "qualifiers", "evidence_ids",
         "review_ids", "actor", "authority", "mission_id",
-        "policy_evaluation_id", "reason_codes", "idempotency_key", "created_at"
+        "policy_evaluation_id", "reason_codes", "idempotency_key", "event_seq",
+        "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.identity-resolution-decision/v1"},
@@ -315,6 +324,7 @@
         "policy_evaluation_id": {"$ref": "#/$defs/stableId"},
         "reason_codes": {"type": "array", "items": {"type": "string"}},
         "idempotency_key": {"type": "string", "minLength": 1},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"}
       },
       "additionalProperties": false
@@ -335,7 +345,7 @@
       "type": "object",
       "required": [
         "contract", "registry_snapshot_id", "sequence", "definitions",
-        "manifest_digest", "status", "created_at"
+        "manifest_digest", "status", "event_seq", "created_at"
       ],
       "properties": {
         "contract": {"const": "erasmus.semantic-registry-snapshot/v1"},
@@ -350,6 +360,7 @@
         "definitions": {"type": "array", "items": {"$ref": "#/$defs/semanticDefinition"}},
         "manifest_digest": {"$ref": "#/$defs/digest"},
         "status": {"enum": ["proposed", "reviewed", "approved", "active", "superseded", "revoked"]},
+        "event_seq": {"$ref": "#/$defs/eventSequence"},
         "created_at": {"$ref": "#/$defs/timestamp"},
         "approval_id": {"type": ["string", "null"]}
       },
@@ -361,7 +372,7 @@
         "contract", "relationship_type_id", "label", "source_types",
         "target_types", "symmetric", "transitive", "cardinality",
         "cycle_policy", "qualifier_schema", "evidence_required",
-        "policy_effective", "renderer", "status"
+        "policy_effective", "renderer", "status", "event_seq"
       ],
       "properties": {
         "contract": {"const": "erasmus.relationship-type/v1"},
@@ -378,7 +389,8 @@
         "evidence_required": {"type": "boolean"},
         "policy_effective": {"type": "boolean"},
         "renderer": {"type": "object"},
-        "status": {"enum": ["proposed", "active", "superseded", "revoked"]}
+        "status": {"enum": ["proposed", "active", "superseded", "revoked"]},
+        "event_seq": {"$ref": "#/$defs/eventSequence"}
       },
       "additionalProperties": false
     },
@@ -387,7 +399,7 @@
       "required": [
         "contract", "channel_id", "name", "audience", "scope_selector",
         "root_path", "policy_id", "policy_version", "rendering_profile",
-        "retention", "status"
+        "retention", "status", "event_seq"
       ],
       "properties": {
         "contract": {"const": "erasmus.publication-channel/v1"},
@@ -401,13 +413,8 @@
         "rendering_profile": {"type": "string", "minLength": 1},
         "retention": {"type": "object"},
         "redaction_profile": {"type": ["string", "null"]},
-        "current_snapshot_id": {
-          "oneOf": [
-            {"$ref": "#/$defs/stableId"},
-            {"type": "null"}
-          ]
-        },
-        "status": {"enum": ["proposed", "active", "suspended", "retired"]}
+        "status": {"enum": ["proposed", "active", "suspended", "retired"]},
+        "event_seq": {"$ref": "#/$defs/eventSequence"}
       },
       "additionalProperties": false
     }

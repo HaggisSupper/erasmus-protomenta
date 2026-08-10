@@ -12,7 +12,7 @@ The bounded Foundry emits external OKF candidate documents with:
 status: draft
 ```
 
-`draft` means only that the external candidate bundle is unverified and not canonical. It is not an internal Phase 3 concept, claim, synthesis, or truth state.
+`draft` means only that the external candidate bundle is unverified and absent from every current channel publication. It is not an internal Phase 3 concept, claim, synthesis, or truth state.
 
 ## 2. Candidate disposition
 
@@ -66,7 +66,6 @@ provisional
 reviewed
 validated
 contested
-canonical
 superseded
 rejected
 deprecated    # concepts only when historical compatibility is retained
@@ -74,7 +73,18 @@ deprecated    # concepts only when historical compatibility is retained
 
 `provisional` is the initial internal Phase 3 lifecycle state. It means the record has been assembled from governed inputs but has not passed independent review.
 
-`canonical` means a validated revision is included in the current immutable published snapshot for an authorized scope. It does not imply that every constituent claim is `established`, current, or uncontested.
+Internal lifecycle records review readiness and history. Publication does not mutate it: a revision may remain `validated` while it is current in a private channel, historical in a project channel, and unpublished in a public channel.
+
+## 5A. Channel publication state
+
+```text
+unpublished
+current
+historical
+withdrawn
+```
+
+This state is a derived relation over `(channel_id, verified receipted snapshot_id, snapshot_members)`, not a global lifecycle transition or truth state. `current` requires the channel pointer's exact committed success receipt. The same revision can have different channel publication states simultaneously.
 
 ## 6. Open-question state
 
@@ -105,15 +115,18 @@ Freshness is orthogonal to truth. `stale` does not mean `falsified`; it means cu
 ## 8. Snapshot state
 
 ```text
-building
+prepared
 validated
 approved
-published
-withdrawn
+materialized
 failed
 ```
 
-A snapshot becomes current only after a successful deterministic publication receipt. Snapshot `validated` is not concept lifecycle `validated` and is not claim truth `established`.
+Snapshot artifact state is reconstructed from append-only events ordered by global `event_seq`. A snapshot event always references an existing snapshot row; an attempt that fails before snapshot creation terminates with a typed failure receipt and appends no snapshot event. `receipt_committed`, activation, rollback, reselection, withdrawal, and attempt failure belong to receipt/selection/directive planes, not snapshot state. A snapshot has one immutable `snapshot_sequence` allocated by its creating intent; later selection never changes it.
+
+### 8.1 Publication attempt and channel-selection identity
+
+`attempt_sequence` identifies every per-channel publication intent, whether it creates a snapshot, fails, rolls back, or reselects. Each intent has exactly one terminal success/failure receipt; failure has no next pointer generation and cannot be selected. `pointer_generation` identifies each successful replacement of that channel's `current.json`. A new channel begins non-serving with no pointer/selection and logical pointer generation 0. Receipt-before-pointer activation creates generation 1; later activation compare-and-swaps the generation-free expected payload and its separate generation. These counters are independent of `snapshot_sequence`: rolling back to an older immutable artifact advances attempt and pointer counters while retaining the target's original snapshot counter.
 
 ## 9. Projection state
 
@@ -191,6 +204,7 @@ No API or database column named only `status` may cross record families without 
 - `epistemic_status`;
 - `concept_lifecycle`;
 - `synthesis_lifecycle`;
+- `channel_publication_state`;
 - `question_state`;
 - `freshness_state`;
 - `snapshot_state`;
@@ -205,9 +219,9 @@ No API or database column named only `status` may cross record families without 
 - Foundry `draft` does not imply Phase 3 `provisional` until governed import and admission complete.
 - Candidate `admissible` does not imply a claim is `plausible` or `supported`.
 - Reconciliation `corroborate` does not imply a ledger support transition unless existing ledger rules pass.
-- Claim `established` does not automatically make its concept `canonical`.
+- Claim `established` does not automatically publish its concept to any channel.
 - Concept `validated` does not automatically publish a snapshot.
-- Snapshot `published` does not make a stale claim current.
+- A publication success receipt does not make its target snapshot current until the exact channel pointer selects it and the channel-selection event confirms that `pointer_generation`.
 - Projection `ready` does not establish truth or trust.
 - Open question `answered` does not automatically canonicalize its answer synthesis.
 

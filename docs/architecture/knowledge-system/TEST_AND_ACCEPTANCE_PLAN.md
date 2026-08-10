@@ -213,8 +213,8 @@ Exhaustively test:
 - required reviews/evidence;
 - risk-specific gates;
 - no self-review;
-- no canonical transition from provisional;
-- canonical-to-contested behavior;
+- no publication eligibility from provisional;
+- currently published validated-to-contested behavior without a global `canonical` lifecycle mutation;
 - superseded/rejected terminal behavior;
 - stale review digest invalidation.
 
@@ -224,14 +224,18 @@ Exhaustively test question closure, parent/child dependencies, blocked/resume be
 
 ### 6.4 Snapshot lifecycle
 
-Test:
+Test the append-only artifact/intent/receipt/selection planes:
 
-- building -> validated -> approved -> published;
-- failure at each step;
-- withdrawal;
-- no publication without receipt;
-- current pointer references only published snapshots;
-- failed/withdrawn snapshot cannot become current.
+- artifact-only `prepared -> validated -> approved -> materialized` events, with `failed` as the terminal artifact failure;
+- every intent has one terminal materialization/reselection receipt; early failure receipts require a typed failure, nullable artifact fields, no next pointer generation, no invented snapshot event, and no selection authority;
+- channel-selection events reference success receipts only;
+- `attempt_sequence`, immutable `snapshot_sequence`, and `pointer_generation` are independently allocated and never substituted;
+- failure/abortion at each step without updating prior rows;
+- withdrawal through a new event and serving directive;
+- no pointer selection without a pre-existing success receipt;
+- current pointer references only a receipt-matched immutable snapshot in the same channel;
+- failed/withdrawn artifact cannot become current.
+- S1 publish, S2 publish, rollback-to-S1 yields snapshot sequences `1,2,1`, attempt sequences `1,2,3`, pointer generations `1,2,3`, two snapshot rows, and three intent/receipt/selection chains.
 
 ### 6.5 Supersession graphs
 
@@ -276,7 +280,7 @@ Prove that Phase 3 reuses existing epistemic semantics:
 
 ### Publication channels
 
-- each channel has an independent current pointer, sequence, projections, scope, and rollback;
+- each channel has independent `attempt_sequence`, immutable `snapshot_sequence`, `pointer_generation`, current pointer, projections, scope, and rollback;
 - public/shared channels cannot expose private paths, sources, counts, or cached results;
 - publishing or rolling back one channel does not change another.
 
@@ -355,22 +359,27 @@ Test:
 - progressive-disclosure indexes;
 - no self-verification.
 
-### 9.4 Atomic publication failpoints
+### 9.4 Append-only publication failpoints
 
 Inject failure:
 
 1. before prepare commit;
 2. after prepare commit;
-3. during first file render;
-4. after all files render;
-5. during first validation;
-6. after validation before approval;
-7. after approval before directory move;
-8. after directory move before pointer swap;
-9. after pointer swap before receipt commit;
-10. after receipt commit before cleanup.
+3. during either deterministic render;
+4. after both renders before comparison;
+5. during validation;
+6. after approval commit before final directory move;
+7. after directory move before receipt commit;
+8. after receipt commit before pointer write;
+9. after pointer temporary-file fsync;
+10. after pointer replace before channel-selection event;
+11. after channel-selection event before cleanup.
 
-For every failpoint, assert exact database/snapshot/pointer state and deterministic recovery action.
+Run the complete matrix both with an existing confirmed pointer and for first activation with no prior pointer. Bootstrap starts absent/non-serving at generation 0; a receipt without a pointer may activate only under the unchanged absent/generation-0 compare-and-swap, and a verified generation-1 pointer without a selection event is confirmed idempotently. A malformed bootstrap pointer never causes recovery to invent or restore a nonexistent prior pointer.
+
+Run rollback/reselection failpoints without render, snapshot/member insertion, or directory rename. Verify the existing artifact and original materialization receipt, then require a new reselection receipt and pointer generation; missing/corrupt targets fail closed as `rollback_unavailable`.
+
+For every failpoint, assert exact event/intent/receipt/snapshot/pointer state and the deterministic recovery-table action. Runtime tests must verify fsync and atomic-replace behavior on declared Windows and Ubuntu filesystems; this design test does not simulate them.
 
 ## 10. Projection tests
 
@@ -465,6 +474,8 @@ Thresholds are set by the implementation mission and dataset maturity. Non-negot
 - omitted counts/reasons present;
 - protected evidence excluded before rendering;
 - deterministic budget allocation;
+- immutable packet persistence requires `event_seq`, `as_known_event_seq`, exact publication receipt, immutable `snapshot_sequence`, `pointer_generation`, and directive-set digest;
+- missing packet ordering/boundary fields fail schema validation, and `as_known_event_seq` cannot exceed packet `event_seq`;
 - retrieval packet/session receipt linkage;
 - malicious retrieved instruction remains quoted data;
 - tool-like text cannot grant tool authority.
@@ -535,7 +546,7 @@ No down migration is required if rollback restores a pre-migration backup and re
 - corrupt one snapshot file and detect manifest failure;
 - corrupt projection artifact and rebuild;
 - remove current pointer and recover from latest valid publication receipt;
-- point current at unreceipted snapshot and reject it;
+- point current at an unreceipted snapshot, reject it, and restore the last verified receipted pointer;
 - restore SQLite backup with missing projections and rebuild;
 - restore with missing source bytes and surface source-unavailable state;
 - disk-full simulation during source copy, database write, snapshot render, and projection build;
@@ -606,6 +617,8 @@ Documentation tests shall check:
 - README, development track, Foundry report, ADR, and roadmap agree on source-of-truth boundaries.
 
 ## 19. CI matrix
+
+Executable runtime fault, concurrency, and recovery tests remain mandatory for the later implementing missions. The documentation/schema suite in this design-only PR validates declared structure and ordering; it cannot establish process-crash, SQLite/filesystem durability, race, migration, or platform behavior.
 
 Minimum when an increment is implemented:
 

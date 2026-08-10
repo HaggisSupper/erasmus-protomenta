@@ -17,6 +17,9 @@ A non-authoritative label, acronym, prior name, path, identifier, misspelling, o
 ### Append-only
 A persistence rule under which committed evidentiary and consequential records are never updated in place or deleted to change history; corrections occur through new records, transitions, supersession, tombstones, or directives.
 
+### Attempt sequence
+The channel-local `attempt_sequence` consumed by every publication intent, including failed, rollback, and reselection attempts. It is independent of snapshot identity and pointer activation.
+
 ### Authority
 A capability-scoped permission to perform a consequential operation. Authority is explicit, independently evaluable, and cannot be inferred from model output, knowledge content, or similarity.
 
@@ -33,7 +36,10 @@ Untrusted or unadmitted material proposed for possible reconciliation. Foundry d
 The Phase 3 state plane describing whether candidate material is `quarantined`, `admissible`, `duplicate`, `insufficient_evidence`, or `rejected`.
 
 ### Canonical
-Included in the current receipted immutable publication snapshot for an authorized publication channel and scope. Canonical publication does not imply that every contained claim is established or uncontested.
+Included in the current receipted immutable publication snapshot for one authorized publication channel and scope. This is a channel-relative relation, not an internal lifecycle or global property. Canonical publication does not imply that every contained claim is established or uncontested.
+
+### Channel publication state
+The derived relation `unpublished`, `current`, `historical`, or `withdrawn` for one revision and publication channel, computed from the verified receipted pointer and immutable snapshot membership.
 
 ### Claim
 An atomic proposition capable of independent support, contradiction, falsification, qualification, or supersession.
@@ -51,7 +57,7 @@ A stable semantic subject that organizes claims and relationships. Concept ident
 In OKF, the bundle-relative file path without `.md`. Erasmus additionally uses a stable concept resource URN independent of the path.
 
 ### Concept lifecycle
-Internal publication-readiness and history: `provisional`, `reviewed`, `validated`, `contested`, `canonical`, `superseded`, `rejected`, or `deprecated`. `draft` is reserved for external Foundry candidate documents and is not an internal Phase 3 concept lifecycle state.
+Internal review-readiness and history: `provisional`, `reviewed`, `validated`, `contested`, `superseded`, `rejected`, or `deprecated`. `draft` is reserved for external Foundry candidate documents and is not an internal Phase 3 concept lifecycle state. Channel publication does not mutate this lifecycle.
 
 ### Concept revision
 An immutable selected representation of one concept, containing exact claim and relationship IDs plus rendering metadata.
@@ -90,7 +96,7 @@ A source span, observation, deterministic receipt, test result, or explicit huma
 The requirement to distinguish genuinely independent corroboration from copies, mirrors, shared upstream sources, or mutually derived assertions.
 
 ### Evidence packet
-A bounded retrieval result containing stable IDs plus source, truth, lifecycle, freshness, contradiction, temporal, scope, uncertainty, and serving-control metadata.
+An authoritative immutable retrieval receipt containing stable IDs plus source, truth, lifecycle, freshness, contradiction, temporal, scope, uncertainty, and serving-control metadata. It records its own global `event_seq`, the resolved `as_known_event_seq` boundary, and the exact receipted channel pointer used.
 
 ### Foundry
 The bounded PDF-to-OKF process that emits external unverified `status: draft` candidate bundles. It does not promote or reconcile knowledge.
@@ -122,8 +128,14 @@ A governed unresolved inquiry with closure criteria, evidence state, related cla
 ### Policy evaluation receipt
 The deterministic record of the exact policy version/digest, request, matched rules, decision, required reviews/approvals, budgets, and reason codes for an operation.
 
+### Pointer generation
+The channel-local `pointer_generation` advanced only by a successful compare-and-swap of `current.json`. Bootstrap begins absent and non-serving at logical generation 0; the first verified selection is generation 1.
+
 ### Projection
 A rebuildable derivative used for retrieval or presentation, including FTS, vector, graph, cache, API, or UI state. A projection is never epistemic authority.
+
+### Snapshot sequence
+The channel-local immutable `snapshot_sequence` allocated exactly once when a new snapshot artifact is created. Rollback or reselection retains the target artifact's original snapshot sequence while advancing attempt sequence and pointer generation.
 
 ### Publication channel
 A governed audience/scope-specific publication surface with its own policy, renderer, immutable snapshots, projections, retention, and current pointer.
@@ -153,7 +165,7 @@ A stable reference to a bounded portion of a source artifact, such as PDF pages 
 A governed derived explanation or composition whose material statements map to exact claims/evidence or are explicitly labeled as interpretation.
 
 ### Transaction time
-The ordered time/sequence at which Erasmus committed a record. It is the boundary for “what was known then.”
+The global SQLite `event_seq` at which Erasmus committed an authoritative Phase 3 append. It is the total-order boundary for “what was known then”; timestamps remain temporal facts only.
 
 ### Truth state
 The proposition-level epistemic state owned exclusively by the existing epistemic ledger. It is not candidate disposition, concept lifecycle, freshness, publication state, or projection state.

@@ -280,7 +280,7 @@ Suggested roles:
 | 10th-Man | seek countercases and gate violations | implement or self-approve corrections |
 | Domain reviewer | assess domain evidence/applicability | grant tool authority |
 | Security/privacy reviewer | scope, secret, policy review | alter truth state without evidence |
-| Publisher | render and atomically publish approved plan | choose claims/reconciliation |
+| Publisher | render/install an approved snapshot and select it only after a durable receipt | choose claims/reconciliation |
 | Projection builder | build derived indexes | mutate authoritative state |
 | Context broker | retrieve authorized evidence | expand scope or execute tools |
 | Human governor | approve consequential/protected changes | bypass evidence/contract gates |
@@ -390,8 +390,12 @@ It must:
 - scan rendered output for secrets/protected data;
 - validate all internal links and source references;
 - compare two deterministic builds;
-- atomically move the completed directory;
+- fsync and atomically move the completed directory on one filesystem;
+- commit its immutable success receipt before replacing the channel pointer;
+- append the channel-selection event after the receipted pointer is verified;
 - write no content into repository/runtime code directories unless a separate mission authorizes export.
+
+Filesystem installation and SQLite receipt commits are separate durability boundaries; the design does not claim that they are atomic together. Recovery therefore follows the receipt-before-pointer protocol in [`STORAGE_PROJECTION_AND_RETRIEVAL.md`](STORAGE_PROJECTION_AND_RETRIEVAL.md).
 
 ## 15. Projection security
 
@@ -441,7 +445,7 @@ The broker must not:
 
 - insert retrieved text into the system-instruction section;
 - strip source IDs or warnings to save tokens;
-- present model-generated candidates as canonical;
+- present model-generated candidates as current published knowledge;
 - hide material contradiction;
 - translate descriptive tool instructions into authorization.
 
@@ -532,9 +536,9 @@ If source content was sent to an external model, deletion guarantees depend on t
 1. Stop affected ingestion, publication, projection, or retrieval capability.
 2. Preserve evidence and exact component identities.
 3. Quarantine affected candidates/sources/projections.
-4. Append an invalidation event, perform bounded impact analysis, and apply authorized qualify/exclude/block/channel-suspend serving directives before further retrieval.
+4. Append an invalidation event and apply the minimum authorized qualify/exclude/block/channel-suspend directive before further retrieval; perform full dependency/use-receipt impact analysis when P3.12 is available.
 5. Identify current and historical snapshots, use receipts, missions, and decisions affected.
-6. Switch the affected channel's `current` pointer to a verified prior snapshot or a withdrawal snapshot when required.
+6. Select a verified prior snapshot or a withdrawal snapshot only through a new rollback intent, success receipt, pointer generation, and channel-selection event.
 7. Revoke compromised tools/models/components through existing registries.
 8. Rebuild projections from a trusted snapshot.
 9. Record immune incident and tangible wrongness where applicable.
@@ -549,7 +553,7 @@ Mandatory 10th-Man review when:
 - a source contains instruction-like content and the candidate materially reflects it;
 - one source family dominates a consequential claim;
 - a contradiction affects safety, security, finance, health, legal, or deployment decisions;
-- a canonical concept is withdrawn or superseded without a direct deterministic cause;
+- a revision is withdrawn from a current channel snapshot or superseded without a direct deterministic cause;
 - a projection/ranking change materially changes consequential retrieval;
 - review independence is uncertain;
 - public/shared publication includes previously private material;

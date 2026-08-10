@@ -83,6 +83,8 @@ All promoted contracts shall be:
 55. `ImpactAnalysis`
 56. `ServingDirective`
 
+Publication also uses immutable `PublicationIntent`, `SnapshotEvent`, and `ChannelSelectionEvent` records; these are distinct from the immutable snapshot artifact and `PublicationReceipt`.
+
 Experimental schema seeds are split by responsibility:
 
 - [`schemas/knowledge-system.schema.json`](schemas/knowledge-system.schema.json) covers the principal source, candidate, claim, concept, review, publication, projection, retrieval, and mutation contracts.
@@ -102,6 +104,10 @@ String matching ^urn:erasmus:[a-z][a-z0-9-]*:[A-Za-z0-9._:-]+$
 ```
 
 A stable ID is immutable. Human-readable titles and paths are not IDs.
+
+### 3.1A `EventSequence`
+
+Every authoritative append-only Phase 3 record carries `event_seq`, a positive integer foreign key to the single SQLite `knowledge_events` order. The event and domain record commit in the same transaction. Domain sequences and timestamps are facts only; historical reconstruction uses global `event_seq`.
 
 ### 3.2 `Actor`
 
@@ -188,6 +194,7 @@ Required fields:
 | `acquired_by` | `Actor` | Acquisition actor |
 | `storage_state` | enum | `available`, `external`, `tombstoned`, `removed` |
 | `metadata` | object | Source-kind metadata with no authority semantics |
+| `event_seq` | positive integer | Global authoritative event order |
 
 Invariants:
 
@@ -212,6 +219,7 @@ Required fields:
 | `extracted_text` | string or protected external reference |
 | `extraction_receipt_id` | `StableId` |
 | `scope` | `Scope` |
+| `event_seq` | positive integer |
 
 Invariants:
 
@@ -239,6 +247,7 @@ Required fields:
   "started_at": "ISO-8601",
   "completed_at": "ISO-8601",
   "status": "success | partial | failure",
+  "event_seq": 31,
   "page_or_object_count": 10,
   "textless_or_failed_coordinates": [],
   "output_digest": {
@@ -303,7 +312,7 @@ Invariants:
 - initial disposition is `quarantined`;
 - `verified` is prohibited;
 - a candidate cannot reference a broader scope than all supporting spans permit;
-- a candidate may be discarded without altering canonical knowledge;
+- a candidate may be discarded without altering any current channel publication;
 - candidate body text is never the unit of epistemic promotion; candidate claims are.
 
 ### 5.2 `CandidateClaim`
@@ -331,6 +340,7 @@ Required fields:
   "scope": {},
   "risk_class": "routine",
   "content_digest": {},
+  "event_seq": 32,
   "created_at": "ISO-8601"
 }
 ```
@@ -381,6 +391,7 @@ Purpose: bounded semantic and deterministic proposal before authority is applied
   "deterministic_checks": [],
   "model_identity": null,
   "confidence": 0.0,
+  "event_seq": 33,
   "created_at": "ISO-8601"
 }
 ```
@@ -409,6 +420,7 @@ Required fields:
 | `mission_id` | Governing mission |
 | `idempotency_key` | Duplicate-command protection |
 | `structured_rationale` | Evidence-based summary |
+| `event_seq` | Global authoritative event order |
 | `created_at` | Commit time |
 
 Invariants:
@@ -432,12 +444,13 @@ Fields:
 ```json
 {
   "concept_id": "urn:erasmus:concept:<uuid>",
+  "event_seq": 34,
   "created_at": "ISO-8601",
   "created_by": "Actor",
   "scope": {},
   "risk_class": "routine | consequential | protected",
   "current_revision_id": "urn:erasmus:concept-revision:<uuid>",
-  "lifecycle": "provisional | reviewed | validated | contested | canonical | superseded | rejected | deprecated",
+  "lifecycle": "provisional | reviewed | validated | contested | superseded | rejected | deprecated",
   "superseded_by": null,
   "canonical_path": "domain/concept-name",
   "prior_paths": [],
@@ -445,7 +458,7 @@ Fields:
 }
 ```
 
-The row identifying the concept may be immutable except for a current-state projection; authoritative lifecycle and revision history are append-only records.
+The row identifying the concept may be immutable except for a current-state projection; authoritative lifecycle and revision history are append-only records. Current publication is separately derived per channel from a verified receipted pointer and snapshot membership.
 
 ### 7.2 `ConceptRevision`
 
@@ -502,6 +515,7 @@ Fields:
 - normalized statement digest;
 - binding decision ID;
 - scope;
+- global `event_seq`;
 - created time.
 
 Rules:
@@ -521,7 +535,7 @@ Open questions record bounded evidence gaps and closure requirements. Hypotheses
 
 `UncertaintyRecord`, `MaterialityAssessment`, `KnowledgeDependency`, `KnowledgeUseReceipt`, `InvalidationEvent`, `ImpactAnalysis`, and `ServingDirective` are defined normatively in [`UNCERTAINTY_IMPACT_AND_SERVING_CONTROLS.md`](UNCERTAINTY_IMPACT_AND_SERVING_CONTROLS.md) and seeded in [`schemas/impact-serving.schema.json`](schemas/impact-serving.schema.json).
 
-These records are append-only. Serving directives constrain retrieval and publication channels but never mutate claim truth, concept lifecycle, or historical snapshots. A final impact analysis reconciles against authoritative dependencies even when graph projections accelerate traversal.
+These records are append-only. `ServingDirective.supersedes_directive_id` is required and nullable only for an initial directive; replacements and retirement/`allow` successors form an acyclic same-subject/channel/scope chain ordered by global `event_seq`. Conflicting active leaves fail closed. Serving directives constrain retrieval and publication channels but never mutate claim truth, concept lifecycle, or historical snapshots. A final impact analysis reconciles against authoritative dependencies even when graph projections accelerate traversal.
 
 ## 8. Review and promotion contracts
 
@@ -540,6 +554,7 @@ These records are append-only. Serving directives constrain retrieval and public
   "required_actions": [],
   "evidence_ids": [],
   "policy_version": "...",
+  "event_seq": 35,
   "created_at": "ISO-8601"
 }
 ```
@@ -548,7 +563,7 @@ A review is append-only. A corrected subject requires a new review; prior failed
 
 ### 8.2 `PromotionDecision`
 
-Purpose: move a concept lifecycle or snapshot state after all gates are satisfied.
+Purpose: append an internal lifecycle or snapshot-event transition after all gates are satisfied. Channel publication selection uses its separate receipt-first event contract.
 
 Fields:
 
@@ -566,6 +581,7 @@ Fields:
 - policy version;
 - rollback target;
 - reason;
+- global `event_seq`;
 - timestamp.
 
 The promotion service recalculates gates from referenced records. It does not trust the command's assertion that gates passed.
@@ -591,30 +607,49 @@ Contains:
 - required approval records;
 - rollback snapshot ID.
 
-### 9.2 `CanonicalSnapshot`
+### 9.2 Publication counter vocabulary
+
+- `attempt_sequence` is a per-channel counter consumed by every immutable `PublicationIntent`, including failed materialization attempts and rollback/reselection attempts.
+- `snapshot_sequence` is a per-channel immutable artifact identity allocated once for a new `CanonicalSnapshot`. Reselecting an old snapshot retains its original value.
+- `pointer_generation` is a per-channel compare-and-swap generation advanced only by a successful pointer replacement.
+
+These counters are machine-readable and independent. No contract contains a generic publication `sequence`, and no equality is inferred between these three counters.
+
+### 9.3 `PublicationIntent`
+
+Required fields include `intent_id`, `channel_id`, `attempt_sequence`, `intent_kind`, `selection_kind`, proposed `target_snapshot_id`, reserved `snapshot_sequence`, complete nullable generation-free `expected_prior_pointer_payload`, required `expected_prior_pointer_generation`, nullable `exact_plan`, nullable `target_materialization_receipt_id`, `event_seq`, and creation time. The payload contains every exact prior `current.json` identity field except `pointer_generation`; the separate generation field is authoritative and an embedded generation is rejected.
+
+`intent_kind = new_snapshot` requires `selection_kind = publish`, an exact non-null plan, and a null target materialization receipt. `intent_kind = reselect_existing` requires `selection_kind = rollback | reselect`, a null plan, and the original verified materialization receipt for the same-channel target. A null expected prior payload is legal only for an unselected channel and requires generation 0; a non-null payload requires its separate exact generation of at least 1.
+
+### 9.4 `CanonicalSnapshot`
 
 ```json
 {
   "snapshot_id": "urn:erasmus:snapshot:<uuid>",
-  "sequence": 42,
+  "creating_intent_id": "urn:erasmus:publication-intent:<uuid>",
+  "channel_id": "urn:erasmus:publication-channel:private-default",
+  "snapshot_sequence": 42,
   "parent_snapshot_id": "urn:erasmus:snapshot:<uuid>",
-  "status": "building | validated | approved | published | withdrawn | failed",
   "scope": {},
   "concept_revision_ids": [],
   "manifest_digest": {},
   "root_path": "local immutable snapshot path",
-  "created_at": "ISO-8601",
-  "published_at": null,
-  "withdrawn_at": null
+  "event_seq": 100,
+  "created_at": "ISO-8601"
 }
 ```
 
-### 9.3 `PublicationReceipt`
+The base snapshot is inserted exactly once by its creating intent. `prepared`, `validated`, `approved`, `materialized`, and `failed` are append-only artifact `SnapshotEvent` values, not mutable snapshot columns. Receipt and channel activation are separate state planes and do not create snapshot events. Rollback/reselection does not insert a new snapshot or member row and does not change `snapshot_sequence`.
+
+### 9.5 `PublicationReceipt`
 
 Fields:
 
-- snapshot ID;
-- plan ID;
+- receipt and publication-intent IDs, with one terminal receipt per intent;
+- `receipt_kind = materialization | reselection`;
+- channel ID and `attempt_sequence`;
+- nullable target snapshot ID and `snapshot_sequence`, which are mandatory and FK-checked for success but may both be null for a pre-artifact failure;
+- `expected_prior_pointer_generation` plus nullable `next_pointer_generation`;
 - publisher implementation/version/digest;
 - validator implementation/version/digest;
 - file count;
@@ -623,10 +658,36 @@ Fields:
 - OKF conformance result;
 - secret/privacy scan result;
 - deterministic rebuild comparison result;
-- atomic-swap result;
-- prior/current pointer values;
+- exact manifest and future pointer-payload digests;
 - duration;
-- status and failure.
+- fixed `success` or `failure` status and typed failure;
+- global event sequence.
+
+A success receipt requires non-null snapshot ID/sequence, manifest and future-pointer digests, `next_pointer_generation = expected_prior_pointer_generation + 1`, and `failure = null`. Only success is eligible for selection, is durably committed before `current.json` can name it, and does not claim the pointer already moved. A failure receipt requires the complete typed failure, has no next pointer generation, and may record its artifact fields as null when failure precedes snapshot creation; it never creates selection authority or a snapshot event without a snapshot row. Publisher, validator, results, and evidence objects remain deterministic on both branches. `ChannelSelectionEvent` records the later verified pointer generation for success only. Rollback is a new intent/receipt/selection chain targeting a prior receipted snapshot.
+
+### 9.6 `ChannelSelectionEvent` and current pointer
+
+The append-only event requires selection-event and intent IDs, channel ID, snapshot ID, immutable `snapshot_sequence`, publication-receipt ID plus constant receipt status `success`, `attempt_sequence`, selection kind, nullable prior snapshot ID, `prior_pointer_generation`, new `pointer_generation`, exact pointer digest, `event_seq`, and creation time. The composite receipt/status FK makes failure receipts non-selectable. `(channel_id, pointer_generation)` and intent ID are unique. Bootstrap requires prior snapshot null, prior generation 0, and new generation 1; later selections require a complete prior pointer/generation and advance exactly once.
+
+`current.json` is the exact payload pre-digested by the receipt:
+
+```json
+{
+  "channel_id": "urn:erasmus:publication-channel:private-default",
+  "snapshot_id": "urn:erasmus:snapshot:<uuid>",
+  "snapshot_sequence": 1,
+  "receipt_id": "urn:erasmus:publication-receipt:<uuid>",
+  "intent_id": "urn:erasmus:publication-intent:<uuid>",
+  "attempt_sequence": 3,
+  "pointer_generation": 3,
+  "manifest_digest": {},
+  "policy_id": "...",
+  "policy_version": "...",
+  "registry_snapshot_id": "..."
+}
+```
+
+For example, publishing S1, publishing S2, then rolling back to S1 yields snapshot sequences `1,2,1`, attempt sequences `1,2,3`, and pointer generations `1,2,3`; only two immutable snapshot rows exist.
 
 ## 10. Projection and retrieval contracts
 
@@ -643,6 +704,7 @@ Fields:
   "scope": {},
   "status": "queued | building | ready | failed | stale | retired",
   "artifact_digest": {},
+  "event_seq": 36,
   "created_at": "ISO-8601",
   "completed_at": null,
   "failure": null
@@ -660,7 +722,7 @@ Required fields:
 - actor;
 - authorized scope;
 - project/domain/applicability constraints;
-- allowed lifecycle states;
+- optional internal lifecycle quality constraints, never channel authorization;
 - stale/contested handling policy;
 - retrieval modes;
 - per-mode limits;
@@ -675,7 +737,13 @@ Required fields:
 {
   "packet_id": "urn:erasmus:evidence-packet:<uuid>",
   "request_id": "...",
+  "channel_id": "urn:erasmus:publication-channel:private-default",
   "snapshot_id": "...",
+  "snapshot_sequence": 1,
+  "publication_receipt_id": "urn:erasmus:publication-receipt:<uuid>",
+  "pointer_generation": 3,
+  "directive_set_digest": {},
+  "as_known_event_seq": 104,
   "items": [
     {
       "claim_id": "...",
@@ -684,7 +752,8 @@ Required fields:
       "concept_path": "...",
       "selected_text": "...",
       "epistemic_status": "supported",
-      "concept_lifecycle": "canonical",
+      "concept_lifecycle": "validated",
+      "channel_publication_state": "current",
       "freshness": "current | stale | unknown",
       "contested": false,
       "source_refs": [],
@@ -698,11 +767,12 @@ Required fields:
   ],
   "omitted": {"count": 0, "reasons": []},
   "budget": {"used": 0, "limit": 0},
+  "event_seq": 106,
   "created_at": "ISO-8601"
 }
 ```
 
-The packet is reference context only and carries no instruction authority.
+The packet is reference context only and carries no instruction authority. It is also an authoritative immutable retrieval receipt: its `event_seq` orders persistence, while `as_known_event_seq <= event_seq` records the resolved query boundary. Canonical packet bytes/digest are persisted so a later `KnowledgeUseReceipt` can reproduce the exact channel, snapshot, receipt, pointer generation, and directive set used.
 
 ## 11. Freshness contracts
 

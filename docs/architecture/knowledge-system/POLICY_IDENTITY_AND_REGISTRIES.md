@@ -75,6 +75,7 @@ An immutable versioned collection of rules activated for an exact deployment and
   "parent_policy_version": null,
   "rules": [],
   "created_by": "human:governor",
+  "event_seq": 1,
   "created_at": "2026-08-09T00:00:00Z",
   "review_ids": [],
   "approval_id": "..."
@@ -165,6 +166,7 @@ Every consequential evaluation produces an immutable receipt:
   "budgets": {},
   "reason_codes": [],
   "evaluated_by": "process:erasmus-knowledge-policy/1.0.0",
+  "event_seq": 2,
   "evaluated_at": "ISO-8601"
 }
 ```
@@ -245,6 +247,7 @@ Entity identity is not inferred from title similarity alone.
     }
   ],
   "created_by": "Actor",
+  "event_seq": 3,
   "created_at": "ISO-8601"
 }
 ```
@@ -322,6 +325,7 @@ A `SemanticRegistrySnapshot` is an immutable collection of recognized semantic d
   "definitions": [],
   "manifest_digest": {},
   "status": "active",
+  "event_seq": 4,
   "created_at": "ISO-8601",
   "approval_id": "..."
 }
@@ -397,7 +401,8 @@ Unregistered predicates may be stored as descriptive strings in provisional clai
   "evidence_required": true,
   "policy_effective": false,
   "renderer": {},
-  "status": "active"
+  "status": "active",
+  "event_seq": 5
 }
 ```
 
@@ -447,8 +452,8 @@ A single global `current` pointer is insufficient when private, project, shared,
   "rendering_profile": "erasmus.okf-renderer/v1",
   "retention": {},
   "redaction_profile": null,
-  "current_snapshot_id": null,
-  "status": "active"
+  "status": "active",
+  "event_seq": 6
 }
 ```
 
@@ -469,6 +474,9 @@ Channel activation requires policy, scope, root confinement, backup, publication
 - Public/shared channels use redacted or declassified source references where required.
 - Updating one channel never changes another channel's pointer.
 - Retrieval requests select a channel explicitly or through deterministic policy.
+- Channel configuration carries no mutable `current_snapshot_id`. Current selection is derived from the verified filesystem pointer plus its already committed success receipt and append-only channel-selection event.
+- `attempt_sequence`, immutable `snapshot_sequence`, and `pointer_generation` are distinct channel-local counters; rollback advances the first and third while retaining the target's original second value.
+- Selection, rollback, and recovery are historically ordered only by global `event_seq`; timestamps and domain counters do not choose a historical winner.
 
 Recommended layout:
 
@@ -487,11 +495,12 @@ state/knowledge/channels/
 
 ## 11. Registry and policy persistence
 
-Target append-only records:
+Target append-only records use the global `knowledge_events.event_seq` defined by the storage contract. Every authoritative row below explicitly includes a required unique event-sequence foreign key.
 
 ```sql
 CREATE TABLE knowledge_policy_sets (
     policy_id TEXT NOT NULL,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     version TEXT NOT NULL,
     policy_digest_json TEXT NOT NULL,
     scope_json TEXT NOT NULL,
@@ -505,6 +514,7 @@ CREATE TABLE knowledge_policy_sets (
 
 CREATE TABLE knowledge_policy_transitions (
     transition_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     policy_id TEXT NOT NULL,
     policy_version TEXT NOT NULL,
     prior_state TEXT,
@@ -519,6 +529,7 @@ CREATE TABLE knowledge_policy_transitions (
 
 CREATE TABLE knowledge_policy_evaluations (
     evaluation_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     policy_id TEXT NOT NULL,
     policy_version TEXT NOT NULL,
     policy_digest_json TEXT NOT NULL,
@@ -532,6 +543,7 @@ CREATE TABLE knowledge_policy_evaluations (
 
 CREATE TABLE knowledge_entities (
     entity_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     entity_type TEXT NOT NULL,
     canonical_label TEXT NOT NULL,
     scope_json TEXT NOT NULL,
@@ -541,6 +553,7 @@ CREATE TABLE knowledge_entities (
 
 CREATE TABLE knowledge_entity_aliases (
     alias_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     entity_id TEXT NOT NULL,
     alias TEXT NOT NULL,
     normalized_alias TEXT NOT NULL,
@@ -559,6 +572,7 @@ CREATE TABLE knowledge_entity_aliases (
 
 CREATE TABLE knowledge_identity_decisions (
     decision_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     proposal_id TEXT NOT NULL,
     relation TEXT NOT NULL,
     source_entity_ids_json TEXT NOT NULL,
@@ -577,6 +591,7 @@ CREATE TABLE knowledge_identity_decisions (
 
 CREATE TABLE knowledge_semantic_registry_snapshots (
     registry_snapshot_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     sequence INTEGER NOT NULL UNIQUE,
     parent_snapshot_id TEXT,
     manifest_digest_json TEXT NOT NULL,
@@ -586,6 +601,7 @@ CREATE TABLE knowledge_semantic_registry_snapshots (
 
 CREATE TABLE knowledge_registry_transitions (
     transition_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     registry_snapshot_id TEXT NOT NULL,
     prior_state TEXT,
     new_state TEXT NOT NULL,
@@ -599,6 +615,7 @@ CREATE TABLE knowledge_registry_transitions (
 
 CREATE TABLE knowledge_publication_channels (
     channel_id TEXT PRIMARY KEY,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     configuration_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -608,16 +625,16 @@ CREATE TABLE knowledge_channel_transitions (
     channel_id TEXT NOT NULL,
     prior_state TEXT,
     new_state TEXT NOT NULL,
-    current_snapshot_id TEXT,
     policy_evaluation_id TEXT NOT NULL,
     actor TEXT NOT NULL,
     authority TEXT NOT NULL,
     reason TEXT NOT NULL,
+    event_seq INTEGER NOT NULL UNIQUE REFERENCES knowledge_events(event_seq),
     created_at TEXT NOT NULL
 );
 ```
 
-Mutable current views are derived from transitions. Base records and transitions are append-only.
+Mutable channel-configuration views are derived from these transitions. Current snapshot selection is not a channel lifecycle field; it is derived only from `current.json`, its receipt, and `knowledge_channel_selection_events`. Base records and transitions are append-only.
 
 ## 12. Compatibility and migration
 

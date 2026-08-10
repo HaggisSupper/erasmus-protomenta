@@ -111,6 +111,8 @@ class PublicationFacadeMixin:
         ).fetchone()
         if channel is None:
             raise ValueError("active publication channel not found")
+        for revision_id in revision_ids:
+            self._validate_revision_for_publication(revision_id, channel_id)
         files: dict[str, bytes] = {}
         for revision_id in sorted(revision_ids):
             revision = self._revision_payload(revision_id)
@@ -134,6 +136,7 @@ class PublicationFacadeMixin:
         if existing:
             result = dict(existing)
             self._verify_publication_receipt(result)
+            self._capture_snapshot_claims(result["snapshot_id"], sorted(revision_ids))
             return result
         sequence = self.db.execute(
             "SELECT COALESCE(MAX(sequence),0)+1 FROM knowledge_snapshots WHERE channel_id=?",
@@ -187,6 +190,7 @@ class PublicationFacadeMixin:
                     "UPDATE knowledge_publication_channels SET current_snapshot_id=? WHERE channel_id=?",
                     (snapshot_id, channel_id),
                 )
+                self._capture_snapshot_claims(snapshot_id, sorted(revision_ids))
         except Exception:
             if staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)

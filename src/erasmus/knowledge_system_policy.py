@@ -10,7 +10,7 @@ from .knowledge_runtime import _digest, _json, _urn
 class PolicyFacadeMixin:
     """Mandatory active-policy gate and governed core mutation facade."""
 
-    def _gate(self, operation: str, actor: str, scope: dict[str, Any] | None = None) -> None:
+    def _gate(self, operation: str, actor: str, scope: dict[str, Any] | None = None) -> dict[str, Any]:
         scope = scope or {
             "visibility": "private",
             "tenant": "local",
@@ -21,6 +21,7 @@ class PolicyFacadeMixin:
         receipt = self.evaluate_policy(operation, actor, scope)
         if receipt["decision"] != "permit":
             raise PermissionError(f"active policy denied {operation}")
+        return receipt
 
     def register_source_bytes(self, data, locator, media_type, scope, actor, authority):
         self._gate("knowledge:source-register", actor, scope)
@@ -90,26 +91,6 @@ class PolicyFacadeMixin:
         result = super().transition_concept(
             concept_id, target, revision_id, actor, authority
         )
-        transition_id = _urn("concept-transition", _digest({
-            "concept": concept_id,
-            "revision": revision_id,
-            "from": before["concept_lifecycle"] if before else None,
-            "to": target,
-            "actor": actor,
-            "ordinal": self.db.execute(
-                "SELECT COUNT(*) FROM knowledge_concept_transitions WHERE concept_id=?",
-                (concept_id,),
-            ).fetchone()[0],
-        }))
-        with self.db:
-            self.db.execute(
-                "INSERT INTO knowledge_concept_transitions(transition_id,concept_id,revision_id,from_state,to_state,actor,authority,reason) VALUES(?,?,?,?,?,?,?,?)",
-                (
-                    transition_id, concept_id, revision_id,
-                    before["concept_lifecycle"], target, actor, authority,
-                    "governed lifecycle transition",
-                ),
-            )
         return result
 
     def create_question(self, text, related_claim_ids, scope, actor, authority):

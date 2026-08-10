@@ -13,7 +13,16 @@ def _runtime(tmp_path: Path) -> tuple[Store, KnowledgeRuntime]:
     store = Store(str(tmp_path / "adversarial.db"))
     store.init()
     store.init_phase3()
-    return store, KnowledgeRuntime(store, tmp_path / "knowledge")
+    runtime = KnowledgeRuntime(store, tmp_path / "knowledge")
+    rules = [
+        {"effect": "permit", "operation": "knowledge:*", "actor": "human:*"},
+        {"effect": "permit", "operation": "knowledge:*", "actor": "process:*"},
+    ]
+    digest = runtime.register_policy_set(
+        "local-adversarial-runtime", rules, "human:admin", "knowledge:policy-admin"
+    )
+    runtime.activate_policy_set("local-adversarial-runtime", digest, "human:admin", "knowledge:policy-admin")
+    return store, runtime
 
 
 def _scope(tenant: str = "local") -> dict:
@@ -90,6 +99,7 @@ def test_phase3_governance_history_rejects_update_and_delete(tmp_path: Path) -> 
         candidate["candidate_id"], "identity", [span["span_id"]], {}, _scope(),
         "routine", "human:scott", "knowledge:claim-decompose",
     )
+    rt.admit_candidate(candidate["candidate_id"], "human:scott", "knowledge:candidate-admit", mission_id=1, idempotency_key="admit-identity")
     left = rt.create_entity("component", "left", _scope(), "human:scott", "knowledge:identity-write")
     right = rt.create_entity("component", "right", _scope(), "human:scott", "knowledge:identity-write")
     identity = rt.record_identity_decision(

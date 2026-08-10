@@ -50,6 +50,10 @@ def _source_claim(system: KnowledgeSystem, statement: str = "Cavitation damages 
 
 def _validated_revision(system: KnowledgeSystem, statement: str = "Cavitation damages impellers.") -> tuple[int, dict, dict]:
     _, _, claim = _source_claim(system, statement)
+    system.admit_candidate(
+        claim["candidate_id"], "human:scott", "knowledge:candidate-admit",
+        mission_id=1, idempotency_key=f"admit:{claim['candidate_claim_id']}",
+    )
     decision = system.reconcile_claim(
         claim["candidate_claim_id"], "create", "human:scott", "knowledge:reconcile",
         mission_id=1, idempotency_key=f"create:{claim['candidate_claim_id']}",

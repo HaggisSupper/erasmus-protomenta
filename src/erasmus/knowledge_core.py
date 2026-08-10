@@ -1318,20 +1318,13 @@ class KnowledgeRuntime:
             ).fetchone()
             if passing is None:
                 raise ValueError("passing exact-revision review required")
+        transition_ordinal = self.db.execute(
+            "SELECT COUNT(*) FROM knowledge_concept_transitions WHERE concept_id=?",
+            (concept_id,),
+        ).fetchone()[0]
         transition_id = _urn(
             "concept-transition",
-            _digest(
-                {
-                    "concept": concept_id,
-                    "revision": revision_id,
-                    "from": current,
-                    "to": target,
-                    "ordinal": self.db.execute(
-                        "SELECT COUNT(*) FROM knowledge_concept_transitions WHERE concept_id=?",
-                        (concept_id,),
-                    ).fetchone()[0],
-                }
-            ),
+            f"{transition_ordinal:06d}:{_digest({'concept': concept_id, 'revision': revision_id, 'from': current, 'to': target})}",
         )
         with self.db:
             self.db.execute(

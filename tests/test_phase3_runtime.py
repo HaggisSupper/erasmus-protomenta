@@ -10,13 +10,23 @@ from erasmus.ledger import EpistemicLedger
 from erasmus.store import Store
 
 
-def _runtime(tmp_path: Path):
+def _runtime(tmp_path: Path, bootstrap_policy: bool = True):
     from erasmus.knowledge_runtime import KnowledgeRuntime
 
     store = Store(str(tmp_path / "erasmus.db"))
     store.init()
     store.init_phase3()
-    return store, KnowledgeRuntime(store, artifact_root=tmp_path / "knowledge")
+    runtime = KnowledgeRuntime(store, artifact_root=tmp_path / "knowledge")
+    if bootstrap_policy:
+        rules = [
+            {"effect": "permit", "operation": "knowledge:*", "actor": "human:*"},
+            {"effect": "permit", "operation": "knowledge:*", "actor": "process:*"},
+        ]
+        digest = runtime.register_policy_set(
+            "local-runtime", rules, "human:admin", "knowledge:policy-admin"
+        )
+        runtime.activate_policy_set("local-runtime", digest, "human:admin", "knowledge:policy-admin")
+    return store, runtime
 
 
 def _scope() -> dict:
@@ -40,7 +50,7 @@ def test_phase3_migrations_are_applied_after_legacy_schema(tmp_path: Path) -> No
 
 
 def test_policy_is_deterministic_deny_by_default_and_deny_overrides_permit(tmp_path: Path) -> None:
-    _, rt = _runtime(tmp_path)
+    _, rt = _runtime(tmp_path, bootstrap_policy=False)
     receipt = rt.evaluate_policy("knowledge:publish", actor="human:scott", scope=_scope(), dry_run=True)
     assert receipt["decision"] == "deny"
     digest = rt.register_policy_set(
@@ -115,6 +125,7 @@ def test_comparison_and_reconciliation_preserve_ledger_as_truth_authority(tmp_pa
     span = rt.register_source_span(source["source_id"], {"kind": "text-lines", "data": {"start": 1, "end": 1}}, "Pump A is red.", _scope(), "human:scott", "knowledge:source-register")
     candidate = rt.import_candidate("foundry/v1", "Pump A", "Pump A is red.", [source["source_id"]], [span["span_id"]], _scope(), "human:scott", "knowledge:candidate-import")
     claim = rt.add_candidate_claim(candidate["candidate_id"], "Pump A is red.", [span["span_id"]], {}, _scope(), "routine", "human:scott", "knowledge:claim-decompose")
+    rt.admit_candidate(candidate["candidate_id"], "human:scott", "knowledge:candidate-admit", 1, "create-red")
     assert rt.compare_claim(claim["candidate_claim_id"])["targets"] == []
     decision = rt.reconcile_claim(claim["candidate_claim_id"], "create", actor="human:scott", authority="knowledge:reconcile", mission_id=1, idempotency_key="create-red")
     proposition_id = decision["proposition_id"]

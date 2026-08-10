@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from .migrations import apply_migrations
+from .phase3_completion_migrations import apply_phase3_completion
 from .phase3_hardening import apply_phase3_hardening
 from .phase3_migrations import apply_phase3_migrations
 
@@ -29,14 +30,14 @@ class Store:
         apply_migrations(self.db)
 
     def init_phase3(self) -> list[int]:
-        """Explicitly activate and harden the additive Phase 3 schema.
+        """Explicitly activate the complete additive Phase 3 schema.
 
-        Callers that instantiate the Phase 3 knowledge runtime invoke this
-        after ``init()``. Both migration runners are idempotent and use the
-        shared auditable schema-version ledger.
+        Callers invoke this after ``init()``. All Phase 3 migration runners are
+        idempotent and use the shared auditable schema-version ledger.
         """
         applied = apply_phase3_migrations(self.db)
         applied.extend(apply_phase3_hardening(self.db))
+        applied.extend(apply_phase3_completion(self.db))
         return applied
 
     def add_event(self, kind: str, payload: str) -> int:

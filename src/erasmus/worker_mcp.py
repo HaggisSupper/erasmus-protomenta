@@ -129,12 +129,12 @@ class WorkerMcpServer:
                 continue
             try:
                 request = json.loads(line)
-            except json.JSONDecodeError as error:
-                response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(error)}}
+            except json.JSONDecodeError as exc:
+                response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(exc)}}
             else:
                 response = self.handle(request)
             if response is not None:
-                output_stream.write(json.dumps(response) + "\n")
+                output_stream.write(json.dumps(response)+"\n")
                 output_stream.flush()
 
 def main() -> None: WorkerMcpServer((Path.cwd(),)).serve()

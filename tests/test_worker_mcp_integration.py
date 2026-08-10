@@ -5,8 +5,6 @@ malformed/untrusted worker output cannot become an authority-bearing result.
 """
 import io
 import json
-import subprocess
-from pathlib import Path
 from unittest.mock import patch
 
 from erasmus.worker_mcp import WorkerMcpServer
@@ -37,7 +35,20 @@ def test_malformed_message_returns_jsonrpc_error(tmp_path):
 
 def test_worker_crash_is_failed_and_advisory(tmp_path):
     server = WorkerMcpServer((tmp_path,))
-    with patch("erasmus.worker_mcp.subprocess.run", return_value=subprocess.CompletedProcess([], 7, "", "boom")):
+    process = type(
+        "P",
+        (),
+        {
+            "pid": 1,
+            "returncode": 7,
+            "communicate": lambda self, **_: ("", "boom"),
+            "kill": lambda self: None,
+            "wait": lambda self: None,
+        },
+    )()
+    with patch("erasmus.worker_mcp.shutil.which", return_value="agy"), patch(
+        "erasmus.worker_mcp.subprocess.Popen", return_value=process
+    ):
         response = server.handle(_request(project_root=str(tmp_path), worker="agy"))
     value = json.loads(response["result"]["content"][0]["text"])
     assert value["status"] == "failed"
@@ -47,7 +58,20 @@ def test_worker_crash_is_failed_and_advisory(tmp_path):
 
 def test_worker_output_is_bounded(tmp_path):
     server = WorkerMcpServer((tmp_path,))
-    with patch("erasmus.worker_mcp.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "x" * 100_000, "")):
+    process = type(
+        "P",
+        (),
+        {
+            "pid": 1,
+            "returncode": 0,
+            "communicate": lambda self, **_: ("x" * 100_000, ""),
+            "kill": lambda self: None,
+            "wait": lambda self: None,
+        },
+    )()
+    with patch("erasmus.worker_mcp.shutil.which", return_value="agy"), patch(
+        "erasmus.worker_mcp.subprocess.Popen", return_value=process
+    ):
         response = server.handle(_request(project_root=str(tmp_path), worker="agy"))
     value = json.loads(response["result"]["content"][0]["text"])
     assert len(value["output"]) <= 20_000

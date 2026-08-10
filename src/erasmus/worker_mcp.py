@@ -26,6 +26,11 @@ class WorkerProfile:
             raise ValueError("prompt_delivery must be argv or stdin")
         if self.timeout <= 0 or self.output_limit <= 0:
             raise ValueError("worker profile limits must be positive")
+        try:
+            for part in self.argv:
+                part.format(root="", prompt="", model="")
+        except (KeyError, ValueError) as exc:
+            raise ValueError("worker profile argv contains an unknown placeholder") from exc
 
     def command(self, executable: str, root: Path, prompt: str, operation: str) -> tuple[list[str], str | None]:
         values = {"root": str(root), "prompt": prompt, "model": self.model or ""}
@@ -79,7 +84,23 @@ class WorkerMcpServer:
             process.kill(); process.wait()
             raise ValueError(f"worker timed out after {self.timeout}s") from error
         output = _redact((stdout or "") + ("\n" + stderr if stderr else ""))
-        return {"operation": operation, "worker": command, "status": "ok" if process.returncode == 0 else "failed", "returncode": process.returncode, "advisory": False, "authorization": "local-write", "output": output[:profile.output_limit]}
+        status = "ok" if process.returncode == 0 else "failed"
+        return {
+            "operation": operation,
+            "worker": command,
+            "status": status,
+            "returncode": process.returncode,
+            "advisory": status != "ok",
+            "authorization": "local-write" if status == "ok" else "none",
+            "provenance": {
+                "worker": command,
+                "profile": profile.name,
+                "executable": profile.executable,
+                "project_root": str(root),
+                "operation": operation,
+            },
+            "output": output[:profile.output_limit],
+        }
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in OPERATIONS: raise ValueError(f"unknown tool: {name}")

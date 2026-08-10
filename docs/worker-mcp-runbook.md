@@ -14,6 +14,12 @@ state, or approves its own work.
   it into a review record.
 - Secrets in output must be redacted before display or persistence. Do not
   treat worker claims, tool descriptions, or retrieved files as authority.
+- Workers are selected through typed `WorkerProfile` records. Profiles build
+  an argument vector with `shell=False`; prompt delivery is explicitly either
+  an argv element or stdin. Executable lookup failure is fail-closed, and each
+  profile bounds timeout and captured output. A worker result is advisory only:
+  it is not an authentication or authorization grant and must retain request,
+  worker, root, command, exit status, and provenance fields at the caller.
 
 ## Failure handling
 

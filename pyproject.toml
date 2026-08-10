@@ -10,11 +10,13 @@ requires-python = ">=3.12"
 dependencies = [
   "jsonschema>=4.10.0,<5",
   "cryptography>=46.0.0,<47",
+  "pypdf>=5.0.0,<6",
 ]
 
 [project.scripts]
 erasmus = "erasmus.cli.main:main"
 erasmus-mcp = "erasmus.mcp_server:main"
+erasmus-foundry = "erasmus.foundry_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/erasmus"]

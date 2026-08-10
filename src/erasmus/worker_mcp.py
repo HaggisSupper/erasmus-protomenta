@@ -71,7 +71,10 @@ class WorkerMcpServer:
         if not executable: raise ValueError(f"worker executable not found: {profile.executable}")
         argv, stdin = profile.command(executable, root, prompt, operation)
         kwargs = dict(cwd=root, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=os.environ.copy())
-        if os.name == "nt": kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kwargs["start_new_session"] = True
         process = subprocess.Popen(argv, **kwargs)
         try:
             if stdin is None:
@@ -79,8 +82,10 @@ class WorkerMcpServer:
             else:
                 stdout, stderr = process.communicate(input=stdin, timeout=min(self.timeout, profile.timeout))
         except subprocess.TimeoutExpired as error:
-            if os.name == "nt": subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True, check=False)
-            else: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True, check=False)
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
             process.kill(); process.wait()
             raise ValueError(f"worker timed out after {self.timeout}s") from error
         output = _redact((stdout or "") + ("\n" + stderr if stderr else ""))

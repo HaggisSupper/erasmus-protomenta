@@ -343,6 +343,7 @@ def main() -> None:
 
     bootstrap_resolve = sub.add_parser("bootstrap-resolve")
     bootstrap_resolve.add_argument("fixture")
+    bootstrap_resolve.add_argument("--human", action="store_true")
 
     args = parser.parse_args()
     store = Store(args.db)
@@ -825,10 +826,16 @@ def main() -> None:
         if not result.ok:
             print(json.dumps(result.as_dict(), indent=2))
             raise SystemExit(1)
-        print(json.dumps({
+        payload = {
             "startup_order": result.derived_startup_order,
             "shutdown_order": result.derived_shutdown_order,
-        }, indent=2))
+        }
+        if args.human:
+            print("Bootstrap component order:")
+            print(f"  startup: {', '.join(result.derived_startup_order)}")
+            print(f"  shutdown: {', '.join(result.derived_shutdown_order)}")
+        else:
+            print(json.dumps(payload, indent=2))
 
 
 def _executable_mission_engine(store: Store, mission_id: int) -> MissionEngine:

@@ -2,13 +2,13 @@
 
 ## Purpose
 
-This protocol coordinates Copilot, Jules, Gemini, Erasmus, deterministic CI, and the Protomentat without allowing authority to emerge implicitly from model consensus.
+This protocol coordinates write-capable worker tooling (`agy` and `opencode` workers), deterministic CI, and the Protomentat without allowing authority to emerge implicitly from model consensus.
 
 ## Roles
 
 - **Erasmus — governor:** defines missions, validates evidence, reconciles dissent, controls reviews, and authorizes merge only when every gate passes.
-- **Worker — implementer:** exactly one write-capable agent owns a branch at a time. Typical workers are Copilot or Jules.
-- **Reviewer — adversary:** Gemini, Jules, Copilot, or another model may review a SHA, but review authority is read-only and advisory.
+- **Worker — implementer:** exactly one write-capable agent owns a branch at a time. Typical workers are `agy` or `opencode` worker profiles.
+- **Reviewer — adversary:** agy, opencode, or another bounded model profile may review a SHA, but review authority is read-only and advisory.
 - **CI — executor of record:** deterministic tests, linters, schema checks, and build results are evidence. Model claims are not test evidence.
 - **Protomentat — final authority:** resolves consequential ambiguity, contract weakening, destructive change, external publication, and irreversible action.
 

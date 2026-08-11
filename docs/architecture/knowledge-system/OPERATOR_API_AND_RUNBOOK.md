@@ -3,6 +3,7 @@
 - **Version:** 1.0.0
 - **Status:** Accepted target design; non-runtime
 - **Purpose:** Define the headless command surface, request/response envelope, long-running job control, operator workflow, diagnostics, backup/recovery, Tauri boundary, and automation behavior for the governed knowledge system
+- **Current implementation status:** no `erasmus knowledge ...` command surface exists in this checkout today; this is a future target design for Phase 3.
 
 ## 1. Operating principle
 

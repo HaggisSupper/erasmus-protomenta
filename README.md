@@ -47,30 +47,79 @@ The installer does not copy project `opencode.json`, choose a provider/model, or
 
 ## Commands
 
+### Core runtime
+
 - `erasmus init` — apply schema migrations and initialise the database
 - `erasmus status` — table row counts and applied schema versions
-- `erasmus mission-create --title "..." --objective "..."`
-- `erasmus sleep` — consolidate events into experience candidates (idempotent)
-- `erasmus sleep-report <run-id>` — inspect classifications, reasons, and stage history
-- `erasmus sleep-decide ...` — record an evidence-backed belief or skill decision
-- `erasmus checkpoint` — JSON-dump the latest committed checkpoint
-- `erasmus runtime-validate configs/local-runtime.example.json` — validate a local endpoint configuration
-- `erasmus runtime-discover configs/local-runtime.example.json` — list models and advertised capabilities
-- `erasmus runtime-smoke configs/local-runtime.example.json --prompt "hello"` — run one bounded, provenance-aware local session
-- `erasmus runtime-embed configs/local-runtime.example.json "text"` — request embeddings when advertised
-- `erasmus-foundry build <pdf-folder> <candidate-bundle> <runtime-config>` — synthesize a validated draft OKF v0.2 bundle from PDFs
-- `erasmus-foundry validate <candidate-bundle> --write-report` — deterministically validate a foundry output bundle
-- `erasmus ledger-evidence-add ...` — append provenance-bearing evidence
-- `erasmus ledger-propose ...` / `ledger-transition ...` — make explicit belief changes
-- `erasmus ledger-inspect <id>` / `ledger-query <id>` — inspect history and evidence
-- `erasmus immune-process <event.json> --authority immune:inspect` — run the immune cascade
-- `erasmus immune-inspect <id>` / `immune-agents` — inspect incidents and dormant state
-- `erasmus divergence-calibrate ...` / `divergence-evaluate ...` — calibrate and evaluate inspectable divergence detectors
-- `erasmus skill-inspect <candidate-id>` / `skill-export ...` — inspect promoted skills and adapter readiness
 - `erasmus integrity` — run `PRAGMA integrity_check`
+- `erasmus checkpoint` — JSON-dump the latest committed checkpoint
 - `erasmus backup <dest>` — hot-backup the database to a file
 - `erasmus restore <src>` — restore from a backup file
-- `erasmus review --proposition "..."`
+
+### Runtime and sleep
+
+- `erasmus runtime-validate <config>` — validate a local endpoint configuration
+- `erasmus runtime-discover <config>` — list models and advertised capabilities
+- `erasmus runtime-smoke <config> --prompt "hello"` — run one bounded local session
+- `erasmus runtime-embed <config> "text"` — request embeddings when advertised
+- `erasmus sleep` — consolidate events into experience candidates (idempotent)
+- `erasmus sleep-report <run-id>` — inspect classifications, reasons, and stage history
+- `erasmus sleep-decide <candidate-id> <decision> <target> <evidence-id> --actor ... --authority ... --reason ...`
+
+### Missions
+
+- `erasmus mission-create --contract ... --title ... --objective ...`
+- `erasmus mission-inspect <mission-id>`
+- `erasmus mission-authorize <mission-id> --actor ... --evidence ... --approval-id ... --deny`
+- `erasmus mission-run-one <mission-id>`
+- `erasmus mission-pause|mission-resume|mission-cancel|mission-rollback <mission-id>`
+
+### Governance, evidence, and cognition
+
+- `erasmus review --proposition "..."` — run the 10th-Man review pathway for a proposition
+- `erasmus immune-process <event.json> --authority ...`
+- `erasmus immune-inspect <incident-id>` — inspect incidents and dormant state
+- `erasmus immune-agents` — list inactive immune agents
+- `erasmus immune-false-positive <incident-id> <detector> --reason ... --actor ... --authority ...`
+- `erasmus immune-retire <agent-id> --reason ... --actor ... --authority ...`
+- `erasmus divergence-calibrate <baseline> <detector> <kind> <threshold> --actor ... --reason ...`
+- `erasmus divergence-evaluate <fixtures> [--calibration ...] --authority ...`
+- `erasmus divergence-downweight <calibration-id> --recommendation ... --actor ... --reason ... --authority ...`
+- `erasmus skill-observe <candidate-id> <source-event-id> <evidence-id> ...`
+- `erasmus skill-promote <candidate-id> <target> ...`
+- `erasmus skill-draft <candidate-id> <document> ...`
+- `erasmus skill-evaluate <candidate-id> <fixtures> ...`
+- `erasmus skill-inspect <candidate-id>`
+- `erasmus skill-export --actor ... --authority ...`
+- `erasmus ledger-evidence-add ...`
+- `erasmus ledger-propose <statement> <evidence-id> ...`
+- `erasmus ledger-transition <proposition-id> <operation> <evidence-id> ...`
+- `erasmus ledger-confidence <proposition-id> <confidence> <evidence-id> ...`
+- `erasmus ledger-supersede <proposition-id> <replacement-id> <evidence-id> ...`
+- `erasmus ledger-inspect <proposition-id>` / `ledger-query <proposition-id>`
+
+### Graph and toolchain
+
+- `erasmus graph-validate <manifest>` / `graph-import <manifest>` / `graph-list`
+- `erasmus graph-inspect <capability>` / `graph-plan <goal> [--authority ...]` / `graph-export <dest>`
+- `erasmus toolchain-validate [document] [--manifests tools/manifests]`
+- `erasmus tool-publisher-register <publishers>`
+- `erasmus tool-register <manifest>`
+- `erasmus tool-verify <manifest> <artifact>`
+- `erasmus tool-install <manifest> <artifact>`
+- `erasmus tool-list`
+- `erasmus tool-inspect <tool-id> <version> <target>`
+- `erasmus tool-activate|tool-deactivate|tool-quarantine|tool-revoke|tool-uninstall <tool-id> <version> <target>`
+- `erasmus tool-execute <capability-id> <capability-version> <target> [args...]`
+- `erasmus tool-health <tool-id> <version> <target> --authority ...`
+- `erasmus tool-export <dest>`
+
+### OKF foundry
+
+- `erasmus-foundry build <pdf-folder> <candidate-bundle> <runtime-config>`
+- `erasmus-foundry validate <candidate-bundle> --write-report`
+
+The knowledge-system command namespace shown in [`docs/architecture/knowledge-system/OPERATOR_API_AND_RUNBOOK.md`](docs/architecture/knowledge-system/OPERATOR_API_AND_RUNBOOK.md) is design-only and not available as runtime CLI today.
 
 The foundry deliberately stops at **draft candidates**: it does not write ledger propositions, verify concepts, reconcile contradictions, build indexes, or silently grant authority. See [`docs/architecture/okf-knowledge-foundry.md`](docs/architecture/okf-knowledge-foundry.md).
 

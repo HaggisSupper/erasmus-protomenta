@@ -4,4 +4,4 @@
 
 # Relationships
 
-May follow [pull-request inspection](/inspect_pull_request.md).
+May follow [pull-request inspection](inspect_pull_request.md).

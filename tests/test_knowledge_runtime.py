@@ -1,14 +1,16 @@
 import json
 import sqlite3
+import sys
 
 import pytest
 
 from erasmus.knowledge_runtime import KnowledgeRuntime, KnowledgeRuntimeError
 from erasmus.migrations import apply_migrations
+from erasmus.cli.main import main
 
 
-def _seed_migrated_db(tmp_path) -> sqlite3.Connection:
-    path = tmp_path / "knowledge.db"
+def _seed_migrated_db(tmp_path, name: str = "knowledge.db") -> sqlite3.Connection:
+    path = tmp_path / name
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
     apply_migrations(db)
@@ -168,3 +170,38 @@ def test_knowledge_runtime_validate_contract_and_inspect_errors(tmp_path):
     runtime = KnowledgeRuntime(db)
     with pytest.raises(KnowledgeRuntimeError):
         runtime.inspect_policy("urn:erasmus:knowledge-policy:missing@1.0.0")
+
+
+def test_knowledge_runtime_cli_validate_inspect_and_evaluate(tmp_path, monkeypatch, capsys):
+    db = _seed_migrated_db(tmp_path, "cli.db")
+    payload = _policy_payload()
+    _insert_policy(db, payload)
+    db.commit()
+    db.close()
+
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps(payload), encoding="utf-8")
+    request_path = tmp_path / "request.json"
+    request_path.write_text(json.dumps(_request_payload()), encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys, "argv", ["erasmus", "--db", str(tmp_path / "cli.db"), "knowledge-policy-validate", str(policy_path)]
+    )
+    main()
+    assert json.loads(capsys.readouterr().out)["valid"] is True
+
+    monkeypatch.setattr(
+        sys, "argv", ["erasmus", "--db", str(tmp_path / "cli.db"), "knowledge-policy-inspect", "urn:erasmus:knowledge-policy:test@1.0.0"]
+    )
+    main()
+    inspected = json.loads(capsys.readouterr().out)
+    assert inspected["policy_id"] == payload["policy_id"]
+    assert inspected["status"] == "active"
+
+    monkeypatch.setattr(
+        sys, "argv", ["erasmus", "--db", str(tmp_path / "cli.db"), "knowledge-policy-evaluate", str(request_path)]
+    )
+    main()
+    response = json.loads(capsys.readouterr().out)
+    assert response["ok"] is True
+    assert response["receipts"][0]["decision"] == "permit"

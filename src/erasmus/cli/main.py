@@ -19,6 +19,7 @@ from erasmus.capability_runtime import (
     validate_json_schema,
 )
 from erasmus.checkpoint import load_latest_checkpoint
+from erasmus.bootstrap_contracts import validate_bootstrap_contract_file
 from erasmus.context import assemble_context, retrieve_fts
 from erasmus.divergence import DivergenceEngine, extract_features
 from erasmus.immune import ImmuneCascade
@@ -335,6 +336,13 @@ def main() -> None:
     toolchain_validate = sub.add_parser("toolchain-validate")
     toolchain_validate.add_argument("document", default="TOOLCHAIN.md", nargs="?")
     toolchain_validate.add_argument("--manifests", default="tools/manifests")
+
+    bootstrap_validate = sub.add_parser("bootstrap-validate")
+    bootstrap_validate.add_argument("fixture")
+    bootstrap_validate.add_argument("--json", action="store_true")
+
+    bootstrap_resolve = sub.add_parser("bootstrap-resolve")
+    bootstrap_resolve.add_argument("fixture")
 
     args = parser.parse_args()
     store = Store(args.db)
@@ -792,6 +800,35 @@ def main() -> None:
         print(json.dumps({"valid": not errors, "errors": errors}, indent=2))
         if errors:
             raise SystemExit(1)
+
+    elif args.cmd == "bootstrap-validate":
+        result = validate_bootstrap_contract_file(args.fixture)
+        if args.json:
+            print(json.dumps(result.as_dict(), indent=2))
+        else:
+            print("Bootstrap contract validation succeeded." if result.ok else "Bootstrap contract validation failed.")
+            print(f"startup_order: {', '.join(result.derived_startup_order)}")
+            print(f"shutdown_order: {', '.join(result.derived_shutdown_order)}")
+            if result.warnings:
+                print("Warnings:")
+                for warning in result.warnings:
+                    print(f"  [~] {warning}")
+            if not result.ok:
+                print("Errors:")
+                for error in result.errors:
+                    print(f"  [!] {error}")
+        if not result.ok:
+            raise SystemExit(1)
+
+    elif args.cmd == "bootstrap-resolve":
+        result = validate_bootstrap_contract_file(args.fixture)
+        if not result.ok:
+            print(json.dumps(result.as_dict(), indent=2))
+            raise SystemExit(1)
+        print(json.dumps({
+            "startup_order": result.derived_startup_order,
+            "shutdown_order": result.derived_shutdown_order,
+        }, indent=2))
 
 
 def _executable_mission_engine(store: Store, mission_id: int) -> MissionEngine:

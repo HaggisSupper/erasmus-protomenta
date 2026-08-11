@@ -87,6 +87,29 @@ def test_bootstrap_resolve_command_writes_orders(monkeypatch, tmp_path, capsys):
     ]
 
 
+def test_bootstrap_resolve_command_human_output(monkeypatch, tmp_path, capsys):
+    repo_root = Path.cwd()
+    fixture, _ = _fixture_paths(repo_root)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "erasmus",
+            "--db",
+            str(tmp_path / "erasmus.db"),
+            "bootstrap-resolve",
+            str(fixture),
+            "--human",
+        ],
+    )
+    main()
+
+    output = capsys.readouterr().out
+    assert "Bootstrap component order:" in output
+    assert "startup:" in output
+    assert "shutdown:" in output
+
+
 def test_bootstrap_resolve_command_fails_on_invalid_fixture(monkeypatch, tmp_path):
     repo_root = Path.cwd()
     _, invalid = _fixture_paths(repo_root)

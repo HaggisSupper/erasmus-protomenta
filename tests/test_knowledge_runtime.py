@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import json
 import sys
 
 import pytest
@@ -17,7 +18,15 @@ def _seed_migrated_db(tmp_path, name: str = "knowledge.db") -> sqlite3.Connectio
     return db
 
 
-def _policy_payload(policy_id: str = "urn:erasmus:knowledge-policy:test", required_authorities: list[str] | tuple[str, ...] = ()):
+def _policy_payload(
+    policy_id: str = "urn:erasmus:knowledge-policy:test",
+    required_authorities: list[str] | tuple[str, ...] = (),
+    *,
+    status: str = "active",
+    effective_at: str = "2026-01-01T00:00:00Z",
+    expires_at: str | None = None,
+    required_reviews: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
+):
     return {
         "contract": "erasmus.knowledge-policy/v1",
         "policy_id": policy_id,
@@ -28,8 +37,9 @@ def _policy_payload(policy_id: str = "urn:erasmus:knowledge-policy:test", requir
             "canonicalization": "canonical-json/v1",
         },
         "scope": {"visibility": "private", "tenant": "unit", "project": None, "labels": []},
-        "status": "active",
-        "effective_at": "2026-01-01T00:00:00Z",
+        "status": status,
+        "effective_at": effective_at,
+        "expires_at": expires_at,
         "created_at": "2026-01-01T00:00:00Z",
         "rules": [
             {
@@ -43,7 +53,7 @@ def _policy_payload(policy_id: str = "urn:erasmus:knowledge-policy:test", requir
                 "lifecycle_requirements": {},
                 "freshness_requirements": {},
                 "required_authorities": list(required_authorities),
-                "required_reviews": [],
+                "required_reviews": list(required_reviews),
                 "human_approval": "never",
                 "tenth_man": {},
                 "automation": "permit",
@@ -83,7 +93,11 @@ def _insert_policy(db: sqlite3.Connection, payload: dict[str, object]) -> None:
     )
 
 
-def _request_payload(policy_id: str = "urn:erasmus:knowledge-policy:test", dry_run: bool = False) -> dict[str, object]:
+def _request_payload(
+    policy_id: str = "urn:erasmus:knowledge-policy:test",
+    dry_run: bool = False,
+    review_ids: tuple[str, ...] | list[str] = (),
+) -> dict[str, object]:
     return {
         "contract": "erasmus.knowledge-request/v1",
         "request_id": "urn:erasmus:knowledge-request:unit",
@@ -97,7 +111,7 @@ def _request_payload(policy_id: str = "urn:erasmus:knowledge-policy:test", dry_r
         "scope": {"visibility": "private", "tenant": "unit", "labels": []},
         "input": {"subject_kind": "candidate"},
         "evidence_ids": [],
-        "review_ids": [],
+        "review_ids": list(review_ids),
         "budgets": {
             "timeout_seconds": 30.0,
             "retry_limit": 1,
@@ -125,6 +139,35 @@ def test_knowledge_runtime_evaluate_policy_request_permits_and_persists(tmp_path
         "SELECT COUNT(*) FROM knowledge_policy_evaluations"
     ).fetchone()[0]
     assert count == 1
+
+
+def test_knowledge_runtime_evaluate_policy_request_blocks_inactive_policy(tmp_path):
+    db = _seed_migrated_db(tmp_path)
+    payload = _policy_payload(status="suspended")
+    _insert_policy(db, payload)
+    db.commit()
+
+    runtime = KnowledgeRuntime(db)
+    response = runtime.evaluate_policy_request(_request_payload(dry_run=False))
+
+    assert response["ok"] is False
+    assert response["failure"]["code"] == "insufficient_policy"
+
+
+def test_knowledge_runtime_evaluate_policy_request_blocks_missing_required_reviews(tmp_path):
+    db = _seed_migrated_db(tmp_path)
+    payload = _policy_payload(
+        required_reviews=[{"review_id": "urn:erasmus:review:approval"}],
+    )
+    _insert_policy(db, payload)
+    db.commit()
+
+    runtime = KnowledgeRuntime(db)
+    response = runtime.evaluate_policy_request(_request_payload())
+
+    assert response["ok"] is False
+    assert response["failure"]["code"] == "missing_review"
+    assert response["failure"]["details"]["rule_ids"] == ["urn:erasmus:policy-rule:test-allow"]
 
 
 def test_knowledge_runtime_evaluate_policy_request_dry_run_does_not_persist(tmp_path):

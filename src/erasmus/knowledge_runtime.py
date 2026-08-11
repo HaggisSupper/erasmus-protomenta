@@ -42,6 +42,7 @@ _FAILURE_ACTIONS = {
     "requires_human_approval": "route request for human approval",
     "requires_tenth_man": "request tenth-man review",
     "conflict": "resolve conflicting rules in the active policy",
+    "missing_review": "supply required review evidence",
 }
 
 
@@ -182,13 +183,16 @@ class KnowledgeRuntime:
         return {"valid": valid, "errors": errors}
 
     def _load_policy(self, policy_id: str, version: str) -> sqlite3.Row | None:
+        now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         row = self.db.execute(
             """
             SELECT *
             FROM knowledge_policy_sets
-            WHERE policy_id = ? AND version = ?
+            WHERE policy_id = ? AND version = ? AND status = 'active'
+              AND effective_at <= ?
+              AND (expires_at IS NULL OR expires_at > ?)
             """,
-            (policy_id, version),
+            (policy_id, version, now, now),
         ).fetchone()
         if row is None:
             return None
@@ -433,10 +437,17 @@ def _evaluate_rules(
     permit = any(auto == "permit" for auto in automations)
 
     required_authorities = tuple(sorted(_coerce_set_union(rule.get("required_authorities", []) for rule in candidates)))
-    required_reviews = tuple(sorted(dict(review) for rule in candidates for review in rule.get("required_reviews", [])))
+    required_reviews = _collect_required_reviews(candidates)
+    required_review_ids = tuple(
+        _coerce_str(review["review_id"])
+        for review in required_reviews
+        if isinstance(review, Mapping) and "review_id" in review
+    )
+    request_review_ids = _sorted_json(request.get("review_ids", ()))
     required_approvals: tuple[Mapping[str, Any], ...] = ()
     required = set(request.get("authority", ()))
     missing_authorities = tuple(authority for authority in required_authorities if authority not in required)
+    missing_reviews = tuple(review_id for review_id in required_review_ids if review_id not in request_review_ids)
 
     remaining: list[Mapping[str, Any]] = []
     next_actions: list[Mapping[str, Any]] = []
@@ -448,6 +459,9 @@ def _evaluate_rules(
     if human_approval_required:
         remaining.append({"kind": "human_approval"})
         next_actions.append({"kind": "request_human_approval"})
+    if missing_reviews:
+        remaining.append({"kind": "missing_review", "review_ids": list(missing_reviews)})
+        next_actions.append({"kind": "obtain_review", "review_ids": list(missing_reviews)})
 
     conflicting = (
         "deny" in automations and ("permit" in automations or "observation_only" in automations)
@@ -467,7 +481,16 @@ def _evaluate_rules(
             action="conflict",
         )
 
-    if missing_authorities or human_approval_required:
+    if missing_authorities or human_approval_required or missing_reviews:
+        if missing_authorities:
+            code = "missing_authority"
+            action = "missing_authority"
+        elif missing_reviews:
+            code = "missing_review"
+            action = "missing_review"
+        else:
+            code = "requires_human_approval"
+            action = "requires_human_approval"
         return _evaluation_blocked(
             policy,
             request,
@@ -477,9 +500,9 @@ def _evaluate_rules(
             remaining,
             next_actions,
             reason="policy preconditions not met",
-            decision="requires_human_approval",
-            code="missing_authority" if missing_authorities else "requires_human_approval",
-            action="missing_authority" if missing_authorities else "requires_human_approval",
+            decision="requires_review",
+            code=code,
+            action=action,
         )
 
     if deny:
@@ -533,7 +556,7 @@ def _evaluation_allowed(
 ) -> Evaluation:
     matched_rule_ids = tuple(str(rule.get("rule_id", "")) for rule in candidates)
     required_authorities = _coerce_set_union(rule.get("required_authorities", []) for rule in candidates)
-    required_reviews = tuple(dict(review) for rule in candidates for review in rule.get("required_reviews", []))
+    required_reviews = _collect_required_reviews(candidates)
     return Evaluation(
         decision=matched_decision,
         matched_rule_ids=matched_rule_ids,
@@ -565,7 +588,7 @@ def _evaluation_blocked(
 ) -> Evaluation:
     matched_rule_ids = tuple(str(rule.get("rule_id", "")) for rule in candidates)
     required_authorities = _coerce_set_union(rule.get("required_authorities", []) for rule in candidates)
-    required_reviews = tuple(dict(review) for rule in candidates for review in rule.get("required_reviews", []))
+    required_reviews = _collect_required_reviews(candidates)
     return Evaluation(
         decision=decision,
         matched_rule_ids=matched_rule_ids,
@@ -629,7 +652,6 @@ def _persist_evaluation(
     evaluation: Evaluation,
 ) -> None:
     request_id = request["request_id"]
-    evaluation_id = f"urn:erasmus:knowledge-policy-evaluation:{_sha256_hex(request_id + request['operation'] + policy_id)}"
     matched = _sorted_json(evaluation.matched_rule_ids)
     required_authorities = _sorted_json(evaluation.required_authorities)
     required_reviews = [dict(item) for item in evaluation.required_reviews]
@@ -640,8 +662,10 @@ def _persist_evaluation(
     request_digest = _sha256_hex(request)
     evaluated_at = datetime.now(UTC).isoformat()
     next_event_seq = (db.execute("SELECT COALESCE(MAX(event_seq), 0) + 1 FROM knowledge_policy_evaluations").fetchone()[0])
-    db.execute(
-        """
+    evaluation_id = f"urn:erasmus:knowledge-policy-evaluation:{_sha256_hex(request_digest + request['operation'] + policy_id + policy_version + str(next_event_seq))}"
+    with db:
+        db.execute(
+            """
         INSERT INTO knowledge_policy_evaluations(
             evaluation_id, policy_set_id, policy_id, policy_version, policy_digest,
             request_id, operation, subject_ids_json, matched_rule_ids_json, decision,
@@ -650,15 +674,22 @@ def _persist_evaluation(
             request_digest, dry_run, evaluated_at, event_seq
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         """,
-        (
+            (
             evaluation_id, policy_set_id, policy_id, policy_version, policy_digest,
             request_id, request["operation"], json.dumps(request.get("subject_ids", [])),
             json.dumps(matched), evaluation.decision, json.dumps(required_authorities),
             json.dumps(required_reviews), json.dumps(required_approvals),
             json.dumps(remaining_conditions), json.dumps(reason_codes),
             request_json, request_digest, evaluated_at, int(next_event_seq),
-        ),
-    )
+            ),
+        )
+
+
+def _collect_required_reviews(rules: Iterable[Mapping[str, Any]]) -> tuple[Mapping[str, Any], ...]:
+    reviews: list[dict[str, Any]] = []
+    for rule in rules:
+        reviews.extend(dict(review) for review in rule.get("required_reviews", []))
+    return tuple(sorted(reviews, key=_canonical_json))
 
 
 def _build_receipt(

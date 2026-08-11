@@ -96,8 +96,8 @@ class WorkerMcpServer:
             "worker": command,
             "status": status,
             "returncode": process.returncode,
-            "advisory": status != "ok",
-            "authorization": "local-write" if status == "ok" else "none",
+            "advisory": True,
+            "authorization": "none",
             "provenance": {
                 "worker": command,
                 "profile": profile.name,

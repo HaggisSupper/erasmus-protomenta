@@ -3,16 +3,18 @@
 - **Version:** 1.0.0
 - **Status:** Accepted target contracts; partially implemented at runtime
 - **Draft schema registration:** Registered for design discovery, review, and validation
-- **Database migration:** None
-- **Runtime activation:** None
+- **Database migration:** Migration 18
+- **Runtime activation:** Source registry commands and persistence layer are active; policy/candidate/serving features are still deferred
 
 This directory defines the governed Phase 3 evolution from external Foundry `status: draft` candidate concepts to provisional internal knowledge, evidence-backed claims, durable concepts, governed syntheses and open questions, immutable OKF v0.2 publication snapshots, and rebuildable retrieval projections.
+
+The current design authority remains fixed to current runtime and ADR constraints; this package is design authority only.
 
 ## Current implementation status
 
 The draft Phase 3 schema set has been registered as an experimental, non-runtime contract surface. Registration makes the schema identities and relationships discoverable and testable; runtime activation is intentionally partial and scoped to source-registry bootstrap.
 
-No migration has been added. No policy, registry, candidate import, identity resolution, serving directive, canonical publication, or retrieval projection has been activated.
+Migration 18 adds the source-registry tables and basic integrity rules. Policy, candidate import, identity resolution, serving directive, canonical publication, and retrieval projection remain deferred.
 
 Static design validation is not runtime evidence for crash safety, concurrency, recovery, filesystem durability, or cross-platform behavior. Each later implementing mission must provide executable fault, race, durability, migration, serving, rollback, and platform evidence.
 
@@ -47,7 +49,7 @@ The schema files are registered draft design fixtures only. They are not importe
 ## Governing decisions and sequence
 
 - [`../../adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md`](../../adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md) fixes operational records, OKF publication, and projection authority boundaries.
-- [`../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md`](../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md) decomposes Phase 3 into independently reversible missions P3.0 through P3.14, including the P3.8B minimum invalidation/serving prerequisite before publication and retrieval.
+- [`../../roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md#track-b-knowledge-system-evolution`](../../roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md#track-b-knowledge-system-evolution) decomposes Phase 3 into independently reversible missions P3.0 through P3.14, including the P3.8B minimum invalidation/serving prerequisite before publication and retrieval.
 - [`../okf-knowledge-foundry.md`](../okf-knowledge-foundry.md) defines the bounded PDF-to-draft-candidate seam implemented by PR #68.
 - [`../../DEVELOPMENT_TRACK.md`](../../DEVELOPMENT_TRACK.md) remains the governing development sequence.
 

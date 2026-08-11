@@ -64,7 +64,7 @@ Use a graph database as the primary knowledge store. It supports relationships b
 - [`../../architecture/knowledge-system/SECURITY_PRIVACY_AND_GOVERNANCE.md`](../../architecture/knowledge-system/SECURITY_PRIVACY_AND_GOVERNANCE.md)
 - [`../../architecture/knowledge-system/TEST_AND_ACCEPTANCE_PLAN.md`](../../architecture/knowledge-system/TEST_AND_ACCEPTANCE_PLAN.md)
 - [`../../architecture/knowledge-system/GLOSSARY.md`](../../architecture/knowledge-system/GLOSSARY.md)
-- [`../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md`](../../roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md)
+- [`../../roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md#track-b-knowledge-system-evolution`](../../roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md#track-b-knowledge-system-evolution)
 - [`../../adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md`](../../adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md)
 
 ## Self-review

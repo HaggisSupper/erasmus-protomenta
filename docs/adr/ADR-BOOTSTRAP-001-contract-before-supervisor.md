@@ -3,7 +3,7 @@
 - **Status:** Accepted as governing contract baseline
 - **Date:** 2026-08-11
 - **Decision scope:** Bootstrap control plane, issue #67
-- **Related requirements:** [`ERASMUS_ENGINEERING_PLATFORM_REQUIREMENTS_ADDENDUM.md`](../requirements/ERASMUS_ENGINEERING_PLATFORM_REQUIREMENTS_ADDENDUM.md#bootstrap-control-plane)
+- **Related requirements:** [`ERASMUS_IMPLEMENTATION_ROADMAP.md`](../roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md#track-a-bootstrap-control-plane)
 
 ## Context
 

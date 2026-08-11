@@ -20,7 +20,7 @@ Until a later bounded mission explicitly promotes a component:
 - no model, provider, adapter, graph, reinforcement, training, UI, or hardware change is authorized;
 - every promoted increment requires its own acceptance criteria, deterministic tests, negative tests, rollback, observation-only mode where applicable, and 10th-Man review.
 
-The implementation sequence is governed by [`ERASMUS_ROUTING_EVOLUTION.md`](../../roadmap/ERASMUS_ROUTING_EVOLUTION.md) and [`ADR-ROUTING-001`](../../adr/ADR-ROUTING-001-adaptive-routing-as-deferred-extension.md). Existing repository governance takes precedence wherever this target specification is less restrictive.
+The implementation sequence is governed by [`ERASMUS_IMPLEMENTATION_ROADMAP.md`](../../roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md#track-c-adaptive-routing-evolution) and [`ADR-ROUTING-001`](../../adr/ADR-ROUTING-001-adaptive-routing-as-deferred-extension.md). Existing repository governance takes precedence wherever this target specification is less restrictive.
 
 ## 1. Executive definition
 

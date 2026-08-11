@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import sys
+import sqlite3
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
 from erasmus.capability_runtime import query_sqlite_fts
+from erasmus.status_surface import collect_status_snapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +66,21 @@ class ErasmusMcpServer:
         if not isinstance(arguments, dict):
             raise ValueError("tool arguments must be an object")
         if name == "erasmus_status":
-            return {"content": [{"type": "text", "text": json.dumps({"state": "ready", "authority": "erasmus", "read_only": True})}]}
+            db_path = arguments.get("database")
+            root = Path(self.allowed_roots[0])
+            candidate = Path(root / (db_path or "erasmus.db")).resolve()
+            snapshot = {"state": "not_available", "authority": "erasmus", "read_only": True}
+            if candidate.is_file() and candidate.exists():
+                try:
+                    if not candidate.is_relative_to(Path(self.allowed_roots[0]).resolve()):
+                        raise ValueError("database path outside allowed root")
+                    with sqlite3.connect(str(candidate)) as connection:
+                        snapshot = collect_status_snapshot(connection)
+                        snapshot["state"] = "ready"
+                        snapshot["source_db"] = str(candidate)
+                except Exception:
+                    snapshot = {"state": "error", "authority": "erasmus", "read_only": True}
+            return {"content": [{"type": "text", "text": json.dumps(snapshot)}]}
         if name == "retrieve_ieee_evidence":
             request = EvidenceRequest.from_arguments(arguments)
             rows = query_sqlite_fts(self.allowed_roots)(asdict(request))["rows"]

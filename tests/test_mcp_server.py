@@ -20,6 +20,27 @@ def test_mcp_status_is_read_only_and_unknown_tool_fails():
     assert error["error"]["message"] == "unknown tool: nope"
 
 
+def test_mcp_status_rejects_database_paths_outside_allowed_root(tmp_path):
+    outside_db = tmp_path / "outside.db"
+    outside_db.write_bytes(b"")
+    with sqlite3.connect(outside_db) as connection:
+        connection.execute("CREATE TABLE test(x INTEGER)")
+    server = ErasmusMcpServer((tmp_path / "state",))
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "erasmus_status",
+                "arguments": {"database": str(outside_db)},
+            },
+        }
+    )
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["state"] in {"not_available", "error"}
+
+
 def test_mcp_ieee_retrieval_is_path_bound_and_provenance_bearing(tmp_path):
     db = tmp_path / "ieee.db"
     with sqlite3.connect(db) as connection:

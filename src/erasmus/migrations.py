@@ -1057,6 +1057,165 @@ MIGRATIONS: list[tuple[int, str]] = [
         BEGIN SELECT RAISE(ABORT, 'adapter readiness exports are append-only'); END;
         """,
     ),
+    (
+        17,
+        # Foundation tables for knowledge policy governance, semantic registry
+        # snapshots, publication channels, and durable policy-evaluation receipts.
+        """
+        CREATE TABLE knowledge_policy_sets(
+            id INTEGER PRIMARY KEY,
+            policy_id TEXT NOT NULL,
+            version TEXT NOT NULL,
+            policy_digest TEXT NOT NULL,
+            policy_json TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(
+                status IN (
+                    'proposed', 'reviewed', 'approved', 'active', 'superseded',
+                    'suspended', 'revoked', 'expired'
+                )
+            ),
+            scope_json TEXT NOT NULL,
+            parent_policy_id TEXT,
+            parent_policy_version TEXT,
+            created_by TEXT NOT NULL,
+            event_seq INTEGER NOT NULL CHECK(event_seq >= 1),
+            review_ids_json TEXT NOT NULL DEFAULT '[]',
+            approval_id TEXT,
+            effective_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(policy_id, version)
+        );
+        CREATE INDEX knowledge_policy_sets_status_idx
+        ON knowledge_policy_sets(status);
+        CREATE TABLE knowledge_policy_evaluations(
+            id INTEGER PRIMARY KEY,
+            evaluation_id TEXT NOT NULL UNIQUE,
+            policy_set_id INTEGER NOT NULL,
+            policy_id TEXT NOT NULL,
+            policy_version TEXT NOT NULL,
+            policy_digest TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            subject_ids_json TEXT NOT NULL DEFAULT '[]',
+            matched_rule_ids_json TEXT NOT NULL DEFAULT '[]',
+            decision TEXT NOT NULL CHECK(
+                decision IN (
+                    'permit', 'deny', 'observation_only',
+                    'requires_review', 'requires_human_approval',
+                    'requires_tenth_man', 'insufficient_policy'
+                )
+            ),
+            required_authorities_json TEXT NOT NULL DEFAULT '[]',
+            required_reviews_json TEXT NOT NULL DEFAULT '[]',
+            required_approvals_json TEXT NOT NULL DEFAULT '[]',
+            remaining_conditions_json TEXT NOT NULL DEFAULT '[]',
+            reason_codes_json TEXT NOT NULL DEFAULT '[]',
+            request_json TEXT NOT NULL,
+            request_digest TEXT NOT NULL,
+            dry_run INTEGER NOT NULL CHECK(dry_run IN (0, 1)),
+            evaluated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            event_seq INTEGER NOT NULL CHECK(event_seq >= 1),
+            FOREIGN KEY(policy_set_id) REFERENCES knowledge_policy_sets(id),
+            UNIQUE(policy_id, policy_version, request_id, event_seq)
+        );
+        CREATE INDEX knowledge_policy_evaluations_lookup_idx
+        ON knowledge_policy_evaluations(policy_id, policy_version);
+        CREATE TRIGGER knowledge_policy_evaluations_no_update
+        BEFORE UPDATE ON knowledge_policy_evaluations
+        BEGIN SELECT RAISE(ABORT, 'knowledge policy evaluations are append-only'); END;
+        CREATE TRIGGER knowledge_policy_evaluations_no_delete
+        BEFORE DELETE ON knowledge_policy_evaluations
+        BEGIN SELECT RAISE(ABORT, 'knowledge policy evaluations are append-only'); END;
+        CREATE TABLE knowledge_semantic_registry_snapshots(
+            id INTEGER PRIMARY KEY,
+            registry_snapshot_id TEXT NOT NULL UNIQUE,
+            sequence INTEGER NOT NULL,
+            parent_snapshot_id TEXT,
+            manifest_digest TEXT NOT NULL,
+            definitions_json TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(
+                status IN ('proposed', 'reviewed', 'approved', 'active', 'superseded', 'revoked')
+            ),
+            event_seq INTEGER NOT NULL CHECK(event_seq >= 1),
+            approval_id TEXT,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX knowledge_semantic_registry_snapshots_status_idx
+        ON knowledge_semantic_registry_snapshots(status);
+        CREATE TABLE knowledge_publication_channels(
+            id INTEGER PRIMARY KEY,
+            channel_id TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            audience TEXT NOT NULL CHECK(audience IN ('private', 'project', 'shared', 'public')),
+            scope_selector_json TEXT NOT NULL,
+            root_path TEXT NOT NULL,
+            policy_id TEXT NOT NULL,
+            policy_version TEXT NOT NULL,
+            rendering_profile TEXT NOT NULL,
+            retention_json TEXT NOT NULL DEFAULT '{}',
+            redaction_profile TEXT,
+            status TEXT NOT NULL CHECK(
+                status IN ('proposed', 'active', 'suspended', 'retired')
+            ),
+            event_seq INTEGER NOT NULL CHECK(event_seq >= 1),
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            policy_set_id INTEGER,
+            FOREIGN KEY(policy_set_id) REFERENCES knowledge_policy_sets(id)
+        );
+        CREATE INDEX knowledge_publication_channels_status_idx
+        ON knowledge_publication_channels(status);
+        CREATE TRIGGER knowledge_policy_sets_no_update
+        BEFORE UPDATE ON knowledge_policy_sets
+        BEGIN SELECT RAISE(ABORT, 'knowledge policy sets are immutable'); END;
+        CREATE TRIGGER knowledge_policy_sets_no_delete
+        BEFORE DELETE ON knowledge_policy_sets
+        BEGIN SELECT RAISE(ABORT, 'knowledge policy sets are immutable'); END;
+        CREATE TRIGGER knowledge_semantic_registry_snapshots_no_update
+        BEFORE UPDATE ON knowledge_semantic_registry_snapshots
+        BEGIN SELECT RAISE(ABORT, 'knowledge semantic registry snapshots are immutable'); END;
+        CREATE TRIGGER knowledge_semantic_registry_snapshots_no_delete
+        BEFORE DELETE ON knowledge_semantic_registry_snapshots
+        BEGIN SELECT RAISE(ABORT, 'knowledge semantic registry snapshots are immutable'); END;
+        CREATE TRIGGER knowledge_publication_channels_no_update
+        BEFORE UPDATE ON knowledge_publication_channels
+        BEGIN SELECT RAISE(ABORT, 'knowledge publication channels are immutable'); END;
+        CREATE TRIGGER knowledge_publication_channels_no_delete
+        BEFORE DELETE ON knowledge_publication_channels
+        BEGIN SELECT RAISE(ABORT, 'knowledge publication channels are immutable'); END;
+        CREATE TABLE knowledge_jobs(
+            id INTEGER PRIMARY KEY,
+            job_id TEXT NOT NULL UNIQUE,
+            request_id TEXT NOT NULL,
+            mission_id INTEGER NOT NULL CHECK(mission_id >= 1),
+            operation TEXT NOT NULL,
+            state TEXT NOT NULL CHECK(
+                state IN (
+                    'queued', 'running', 'paused', 'blocked', 'cancelling',
+                    'cancelled', 'completed', 'failed'
+                )
+            ),
+            priority INTEGER NOT NULL,
+            lease_json TEXT,
+            checkpoint_json TEXT NOT NULL DEFAULT '{}',
+            attempt INTEGER NOT NULL CHECK(attempt >= 0),
+            retry_limit INTEGER NOT NULL CHECK(retry_limit >= 0),
+            cancel_requested INTEGER NOT NULL CHECK(cancel_requested IN (0, 1)),
+            progress_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            started_at TEXT,
+            completed_at TEXT,
+            failure_json TEXT,
+            created_by TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(request_id, operation, mission_id)
+        );
+        CREATE INDEX knowledge_jobs_lookup_idx
+        ON knowledge_jobs(state, operation);
+        """,
+    ),
 ]
 
 

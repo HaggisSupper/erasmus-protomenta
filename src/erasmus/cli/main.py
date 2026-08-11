@@ -24,6 +24,7 @@ from erasmus.divergence import DivergenceEngine, extract_features
 from erasmus.immune import ImmuneCascade
 from erasmus.ledger import EpistemicLedger
 from erasmus.missions import MissionEngine, create_mission
+from erasmus.knowledge_runtime import KnowledgeRuntime
 from erasmus.review import tenth_man_prompt
 from erasmus.runtime import LocalRuntimeConfig, OpenAICompatibleRuntime, run_session
 from erasmus.skills import SkillPromotionEngine
@@ -137,6 +138,14 @@ def main() -> None:
     divergence_downweight.add_argument("--actor", required=True)
     divergence_downweight.add_argument("--reason", required=True)
     divergence_downweight.add_argument("--authority", required=True)
+
+    knowledge_policy_validate = sub.add_parser("knowledge-policy-validate")
+    knowledge_policy_validate.add_argument("policy")
+    knowledge_policy_inspect = sub.add_parser("knowledge-policy-inspect")
+    knowledge_policy_inspect.add_argument("reference")
+    knowledge_policy_evaluate = sub.add_parser("knowledge-policy-evaluate")
+    knowledge_policy_evaluate.add_argument("request")
+
     skill_observe = sub.add_parser("skill-observe")
     skill_observe.add_argument("candidate_id", type=int)
     skill_observe.add_argument("source_event_id", type=int)
@@ -490,6 +499,17 @@ def main() -> None:
             args.authority,
         )
         print(json.dumps({"calibration_id": calibration_id}, indent=2))
+
+    elif args.cmd == "knowledge-policy-validate":
+        payload = json.loads(Path(args.policy).read_text(encoding="utf-8"))
+        print(json.dumps(KnowledgeRuntime.validate_knowledge_policy(payload), indent=2))
+
+    elif args.cmd == "knowledge-policy-inspect":
+        print(json.dumps(KnowledgeRuntime(store.db).inspect_policy(args.reference), indent=2))
+
+    elif args.cmd == "knowledge-policy-evaluate":
+        request = json.loads(Path(args.request).read_text(encoding="utf-8"))
+        print(json.dumps(KnowledgeRuntime(store.db).evaluate_policy_request(request), indent=2))
 
     elif args.cmd == "skill-observe":
         observation_id = SkillPromotionEngine(store).observe(

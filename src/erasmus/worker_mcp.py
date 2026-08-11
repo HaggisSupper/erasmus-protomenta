@@ -96,8 +96,8 @@ class WorkerMcpServer:
             "worker": command,
             "status": status,
             "returncode": process.returncode,
-            "advisory": status != "ok",
-            "authorization": "local-write" if status == "ok" else "none",
+            "advisory": True,
+            "authorization": "none",
             "provenance": {
                 "worker": command,
                 "profile": profile.name,
@@ -107,7 +107,6 @@ class WorkerMcpServer:
             },
             "output": output[:profile.output_limit],
         }
-
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name not in OPERATIONS: raise ValueError(f"unknown tool: {name}")
         return self._run(name, self._root(arguments.get("project_root")), arguments.get("prompt", "health check"), arguments.get("worker", "agy"))

@@ -102,6 +102,7 @@ The installer does not copy project `opencode.json`, choose a provider/model, or
 
 - `erasmus graph-validate <manifest>` / `graph-import <manifest>` / `graph-list`
 - `erasmus graph-inspect <capability>` / `graph-plan <goal> [--authority ...]` / `graph-export <dest>`
+- `erasmus bootstrap-validate <fixture>` / `bootstrap-resolve <fixture>`
 - `erasmus toolchain-validate [document] [--manifests tools/manifests]`
 - `erasmus tool-publisher-register <publishers>`
 - `erasmus tool-register <manifest>`

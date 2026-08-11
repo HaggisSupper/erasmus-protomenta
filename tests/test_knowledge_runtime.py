@@ -1,4 +1,3 @@
-import json
 import sqlite3
 import json
 import sys
@@ -26,7 +25,29 @@ def _policy_payload(
     effective_at: str = "2026-01-01T00:00:00Z",
     expires_at: str | None = None,
     required_reviews: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
+    rules: list[dict[str, object]] | tuple[dict[str, object], ...] | None = None,
 ):
+    base_rule = {
+        "rule_id": "urn:erasmus:policy-rule:test-allow",
+        "operations": ["knowledge:analyze"],
+        "subject_kinds": ["candidate"],
+        "risk_classes": ["routine"],
+        "scope_selector": {},
+        "source_requirements": {},
+        "epistemic_requirements": {},
+        "lifecycle_requirements": {},
+        "freshness_requirements": {},
+        "required_authorities": list(required_authorities),
+        "required_reviews": list(required_reviews),
+        "human_approval": "never",
+        "tenth_man": {},
+        "automation": "permit",
+        "budgets": {},
+        "retention": {},
+        "publication": {},
+        "fallback": "degrade",
+        "priority": 1,
+    }
     return {
         "contract": "erasmus.knowledge-policy/v1",
         "policy_id": policy_id,
@@ -42,27 +63,7 @@ def _policy_payload(
         "expires_at": expires_at,
         "created_at": "2026-01-01T00:00:00Z",
         "rules": [
-            {
-                "rule_id": "urn:erasmus:policy-rule:test-allow",
-                "operations": ["knowledge:analyze"],
-                "subject_kinds": ["candidate"],
-                "risk_classes": ["routine"],
-                "scope_selector": {},
-                "source_requirements": {},
-                "epistemic_requirements": {},
-                "lifecycle_requirements": {},
-                "freshness_requirements": {},
-                "required_authorities": list(required_authorities),
-                "required_reviews": list(required_reviews),
-                "human_approval": "never",
-                "tenth_man": {},
-                "automation": "permit",
-                "budgets": {},
-                "retention": {},
-                "publication": {},
-                "fallback": "degrade",
-                "priority": 1,
-            }
+            *(rules if rules is not None else [base_rule]),
         ],
         "created_by": "process:unit",
         "event_seq": 1,
@@ -97,7 +98,14 @@ def _request_payload(
     policy_id: str = "urn:erasmus:knowledge-policy:test",
     dry_run: bool = False,
     review_ids: tuple[str, ...] | list[str] = (),
+    scope: dict[str, object] | None = None,
+    input: dict[str, object] | None = None,
+    actor: str = "process:unit",
 ) -> dict[str, object]:
+    request_scope = {"visibility": "private", "tenant": "unit", "labels": []} if scope is None else scope
+    request_input: dict[str, object] = {"subject_kind": "candidate"}
+    if input is not None:
+        request_input.update(input)
     return {
         "contract": "erasmus.knowledge-request/v1",
         "request_id": "urn:erasmus:knowledge-request:unit",
@@ -108,8 +116,8 @@ def _request_payload(
         "expected_revisions": {},
         "policy": {"policy_id": policy_id, "version": "1.0.0"},
         "registry_snapshot_id": "urn:erasmus:semantic-registry:default",
-        "scope": {"visibility": "private", "tenant": "unit", "labels": []},
-        "input": {"subject_kind": "candidate"},
+        "scope": request_scope,
+        "input": request_input,
         "evidence_ids": [],
         "review_ids": list(review_ids),
         "budgets": {
@@ -118,6 +126,7 @@ def _request_payload(
             "max_model_calls": 1,
             "max_output_bytes": 1024,
         },
+        "actor": actor,
         "dry_run": dry_run,
         "requested_at": "2026-01-01T00:00:00Z",
     }
@@ -168,6 +177,87 @@ def test_knowledge_runtime_evaluate_policy_request_blocks_missing_required_revie
     assert response["ok"] is False
     assert response["failure"]["code"] == "missing_review"
     assert response["failure"]["details"]["rule_ids"] == ["urn:erasmus:policy-rule:test-allow"]
+
+
+def test_knowledge_runtime_evaluate_policy_request_filters_scope_and_selector_requirements(tmp_path):
+    db = _seed_migrated_db(tmp_path)
+    payload = _policy_payload()
+    payload["rules"][0]["scope_selector"] = {"visibility": "private", "tenant": "unit"}
+    payload["rules"][0]["source_requirements"] = {"source_type": "trusted"}
+    _insert_policy(db, payload)
+    db.commit()
+
+    runtime = KnowledgeRuntime(db)
+    matching = runtime.evaluate_policy_request(_request_payload(input={"source_type": "trusted"}))
+    blocked = runtime.evaluate_policy_request(_request_payload(scope={"visibility": "public", "tenant": "unit", "labels": []}))
+    blocked_by_source = runtime.evaluate_policy_request(
+        _request_payload(input={"source_type": "untrusted"}, scope={"visibility": "private", "tenant": "unit", "labels": []})
+    )
+
+    assert matching["ok"] is True
+    assert matching["receipts"][0]["decision"] == "permit"
+    assert blocked["ok"] is False
+    assert blocked["failure"]["code"] == "insufficient_policy"
+    assert blocked_by_source["ok"] is False
+    assert blocked_by_source["failure"]["code"] == "insufficient_policy"
+
+
+def test_knowledge_runtime_evaluate_policy_request_denies_override_lower_priority_permit(tmp_path):
+    db = _seed_migrated_db(tmp_path)
+    rules = [
+        {
+            "rule_id": "urn:erasmus:policy-rule:test-deny",
+            "operations": ["knowledge:analyze"],
+            "subject_kinds": ["candidate"],
+            "risk_classes": ["routine"],
+            "scope_selector": {},
+            "source_requirements": {},
+            "epistemic_requirements": {},
+            "lifecycle_requirements": {},
+            "freshness_requirements": {},
+            "required_authorities": [],
+            "required_reviews": [],
+            "human_approval": "never",
+            "tenth_man": {},
+            "automation": "deny",
+            "budgets": {},
+            "retention": {},
+            "publication": {},
+            "fallback": "degrade",
+            "priority": 1,
+        },
+        {
+            "rule_id": "urn:erasmus:policy-rule:test-permit-high",
+            "operations": ["knowledge:analyze"],
+            "subject_kinds": ["candidate"],
+            "risk_classes": ["routine"],
+            "scope_selector": {},
+            "source_requirements": {},
+            "epistemic_requirements": {},
+            "lifecycle_requirements": {},
+            "freshness_requirements": {},
+            "required_authorities": [],
+            "required_reviews": [],
+            "human_approval": "never",
+            "tenth_man": {},
+            "automation": "permit",
+            "budgets": {},
+            "retention": {},
+            "publication": {},
+            "fallback": "degrade",
+            "priority": 10,
+        },
+    ]
+    payload = _policy_payload(rules=rules)
+    _insert_policy(db, payload)
+    db.commit()
+
+    runtime = KnowledgeRuntime(db)
+    response = runtime.evaluate_policy_request(_request_payload())
+
+    assert response["ok"] is False
+    assert response["failure"]["code"] == "denied"
+    assert response["receipts"][0]["decision"] == "deny"
 
 
 def test_knowledge_runtime_evaluate_policy_request_dry_run_does_not_persist(tmp_path):

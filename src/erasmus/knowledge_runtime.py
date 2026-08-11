@@ -137,6 +137,61 @@ def _sorted_json(value: Mapping[str, Any] | list[Any]) -> tuple[str, ...]:
     return tuple(sorted(str(v) for v in value))
 
 
+def _automation_modes(rule: Mapping[str, Any]) -> tuple[str, ...]:
+    automation = rule.get("automation")
+    if isinstance(automation, str):
+        return (automation,)
+    if isinstance(automation, Iterable) and not isinstance(automation, (bytes, bytearray, dict)):
+        return tuple(str(value) for value in automation)
+    return (str(automation),)
+
+
+def _selector_matches(selector: Mapping[str, Any], context: Mapping[str, Any]) -> bool:
+    if not selector:
+        return True
+    if not isinstance(context, Mapping):
+        return False
+    for key, expected in selector.items():
+        if key not in context:
+            return False
+        actual = context[key]
+        if isinstance(expected, (list, tuple, set, frozenset)):
+            expected_values = {_coerce_str(value) for value in expected}
+            if isinstance(actual, str):
+                actual_values = {_coerce_str(actual)}
+            elif isinstance(actual, (bytes, bytearray)):
+                return False
+            elif isinstance(actual, Iterable):
+                actual_values = {_coerce_str(value) for value in actual}
+            else:
+                actual_values = {_coerce_str(str(actual))}
+            if not expected_values.intersection(actual_values):
+                return False
+            continue
+        if str(actual) != str(expected):
+            return False
+    return True
+
+
+def _request_selector_context(request: Mapping[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for field in ("scope", "source", "epistemic", "lifecycle", "freshness", "channel", "mission"):
+        value = request.get(field)
+        if isinstance(value, Mapping):
+            context.update(value)
+        else:
+            if value is not None:
+                context[field] = value
+    input_payload = request.get("input")
+    if isinstance(input_payload, Mapping):
+        for key, value in input_payload.items():
+            context.setdefault(key, value)
+    for key, value in request.items():
+        if key not in context:
+            context[key] = value
+    return context
+
+
 class KnowledgeRuntime:
     """Bounded evaluator and inspector for P3.0A foundations."""
 
@@ -384,6 +439,7 @@ def _match_rules(
     rules: list[Mapping[str, Any]],
     request: Mapping[str, Any],
 ) -> tuple[Mapping[str, Any], ...]:
+    selector_context = _request_selector_context(request)
     operation = request["operation"]
     requested_authorities = tuple(sorted(_sorted_json(_coerce_sequence(request.get("authority", [])))))
     requested_risk = str(request.get("risk_class", "routine"))
@@ -393,6 +449,16 @@ def _match_rules(
         if operation not in rule.get("operations", ()):
             continue
         if requested_risk not in rule.get("risk_classes", ()):
+            continue
+        if not _selector_matches(rule.get("scope_selector", {}), request.get("scope", {})):
+            continue
+        if not _selector_matches(rule.get("source_requirements", {}), selector_context):
+            continue
+        if not _selector_matches(rule.get("epistemic_requirements", {}), selector_context):
+            continue
+        if not _selector_matches(rule.get("lifecycle_requirements", {}), selector_context):
+            continue
+        if not _selector_matches(rule.get("freshness_requirements", {}), selector_context):
             continue
         if subject_kind is not None:
             subject_kinds = tuple(rule.get("subject_kinds", ()))
@@ -430,8 +496,26 @@ def _evaluate_rules(
         )
 
     top_priority = int(rules[0].get("priority", 0))
-    candidates = tuple(rule for rule in rules if int(rule.get("priority", 0)) == top_priority)
-    automations = _sorted_json(rule.get("automation") for rule in candidates)
+    top_priority_rules = tuple(rule for rule in rules if int(rule.get("priority", 0)) == top_priority)
+    deny_rules = tuple(rule for rule in rules if "deny" in _automation_modes(rule))
+    if deny_rules:
+        existing_rule_ids = {str(rule.get("rule_id", "")) for rule in top_priority_rules}
+        candidates = list(top_priority_rules)
+        for rule in deny_rules:
+            rule_id = str(rule.get("rule_id", ""))
+            if rule_id and rule_id in existing_rule_ids:
+                continue
+            if rule_id == "" and rule in candidates:
+                continue
+            candidates.append(rule)
+            if rule_id:
+                existing_rule_ids.add(rule_id)
+        candidates = tuple(candidates)
+    else:
+        candidates = top_priority_rules
+    automations = tuple(
+        auto for rule in candidates for auto in _automation_modes(rule)
+    )
     deny = any(auto == "deny" for auto in automations)
     observation_only = any(auto == "observation_only" for auto in automations)
     permit = any(auto == "permit" for auto in automations)
@@ -464,8 +548,8 @@ def _evaluate_rules(
         next_actions.append({"kind": "obtain_review", "review_ids": list(missing_reviews)})
 
     conflicting = (
-        "deny" in automations and ("permit" in automations or "observation_only" in automations)
-    ) or (permit and observation_only)
+        (permit and observation_only)
+    ) and not deny
     if conflicting:
         return _evaluation_blocked(
             policy,

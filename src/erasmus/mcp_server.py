@@ -51,7 +51,11 @@ class ErasmusMcpServer:
                 return None
             if method == "tools/list":
                 return self._result(request_id, {"tools": [
-                    {"name": "erasmus_status", "description": "Read-only Erasmus governance status.", "inputSchema": {"type": "object", "properties": {}}},
+                    {
+                        "name": "erasmus_status",
+                        "description": "Read-only Erasmus governance status.",
+                        "inputSchema": {"type": "object", "properties": {"database": {"type": "string"}}},
+                    },
                     {"name": "retrieve_ieee_evidence", "description": "Read licensed IEEE evidence from an allowed SQLite FTS index.", "inputSchema": {"type": "object", "required": ["database", "table", "query"], "properties": {"database": {"type": "string"}, "table": {"type": "string"}, "query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}}},
                 ]})
             if method == "tools/call":
@@ -67,17 +71,25 @@ class ErasmusMcpServer:
             raise ValueError("tool arguments must be an object")
         if name == "erasmus_status":
             db_path = arguments.get("database")
-            root = Path(self.allowed_roots[0])
-            candidate = Path(root / (db_path or "erasmus.db")).resolve()
+            root = Path(self.allowed_roots[0]).resolve()
+            candidate = Path(db_path or "erasmus.db")
+            if not candidate.is_absolute():
+                candidate = root / candidate
+            candidate = candidate.resolve()
             snapshot = {"state": "not_available", "authority": "erasmus", "read_only": True}
-            if candidate.is_file() and candidate.exists():
+            if not candidate.is_relative_to(root):
+                return {"content": [{"type": "text", "text": json.dumps(snapshot)}]}
+            if candidate.is_file():
                 try:
-                    if not candidate.is_relative_to(Path(self.allowed_roots[0]).resolve()):
-                        raise ValueError("database path outside allowed root")
                     with sqlite3.connect(str(candidate)) as connection:
-                        snapshot = collect_status_snapshot(connection)
-                        snapshot["state"] = "ready"
-                        snapshot["source_db"] = str(candidate)
+                        payload = collect_status_snapshot(connection)
+                        snapshot = {
+                            "authority": "erasmus",
+                            "read_only": True,
+                            "source_db": str(candidate),
+                            "state": "ready",
+                            **payload,
+                        }
                 except Exception:
                     snapshot = {"state": "error", "authority": "erasmus", "read_only": True}
             return {"content": [{"type": "text", "text": json.dumps(snapshot)}]}

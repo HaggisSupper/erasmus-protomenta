@@ -3,7 +3,7 @@
 - **Version:** 1.0.0
 - **Status:** Accepted target design; non-runtime
 - **Purpose:** Define the headless command surface, request/response envelope, long-running job control, operator workflow, diagnostics, backup/recovery, Tauri boundary, and automation behavior for the governed knowledge system
-- **Current implementation status:** no `erasmus knowledge ...` command surface exists in this checkout today; this is a future target design for Phase 3.
+- **Current implementation status:** `erasmus knowledge-source-*` and `erasmus knowledge-source-span-*` commands are implemented in this checkout; all other `erasmus knowledge <resource> <operation>` commands remain target design.
 
 ## 1. Operating principle
 
@@ -110,6 +110,8 @@ erasmus knowledge <resource> <operation>
 
 An initial implementation may expose a temporary `erasmus-knowledge` console script if the existing CLI router cannot accept nested commands without unrelated refactoring. Both surfaces must invoke the same service contracts and emit identical JSON.
 
+In this checkout, `erasmus knowledge-source-*` commands are implemented with equivalent request/response semantics as the design intent.
+
 ### 3.1 Global options
 
 ```text
@@ -137,15 +139,17 @@ Default machine output is JSON. Table output is a read-only presentation conveni
 ### 3.2 Source commands
 
 ```powershell
-erasmus knowledge source add --path D:\Knowledge\paper.pdf ...
-erasmus knowledge source inspect <source-id>
-erasmus knowledge source verify <source-id>
-erasmus knowledge source list --scope <scope.json>
-erasmus knowledge source tombstone <source-id> --reason "..."
-erasmus knowledge source impact <source-id>
+erasmus knowledge-source-add D:\Knowledge\paper.pdf --source-kind document --media-type text/plain
+erasmus knowledge-source-inspect <source-id>
+erasmus knowledge-source-verify <source-id>
+erasmus knowledge-source-list --scope-json "{`"tenant`":`"ops`"}"
+erasmus knowledge-source-tombstone <source-id> --reason "deprecated"
+erasmus knowledge-source-span-add <source-id> --start-page 1 --end-page 1 --coordinate-json "{`"page`":1}" --extracted-text "..."
+erasmus knowledge-source-span-inspect <span-id>
+erasmus knowledge-source-span-list <source-id>
 ```
 
-`source add` performs registration and approved extraction only when the request names the extractor profile. It never synthesizes claims implicitly.
+`knowledge-source-add` performs registration and stores a local immutable source artifact.
 
 ### 3.3 Candidate commands
 

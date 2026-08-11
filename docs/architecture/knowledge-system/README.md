@@ -1,7 +1,7 @@
 # Erasmus Phase 3 Knowledge-System Design Package
 
 - **Version:** 1.0.0
-- **Status:** Accepted target contracts; deferred, non-authorizing, and runtime-unverified
+- **Status:** Accepted target contracts; partially implemented at runtime
 - **Draft schema registration:** Registered for design discovery, review, and validation
 - **Database migration:** None
 - **Runtime activation:** None
@@ -10,7 +10,7 @@ This directory defines the governed Phase 3 evolution from external Foundry `sta
 
 ## Current implementation status
 
-The draft Phase 3 schema set has been registered as an experimental, non-runtime contract surface. Registration makes the schema identities and relationships discoverable and testable; it does not create database tables or authorize behavior.
+The draft Phase 3 schema set has been registered as an experimental, non-runtime contract surface. Registration makes the schema identities and relationships discoverable and testable; runtime activation is intentionally partial and scoped to source-registry bootstrap.
 
 No migration has been added. No policy, registry, candidate import, identity resolution, serving directive, canonical publication, or retrieval projection has been activated.
 
@@ -71,7 +71,7 @@ authorization-aware serving directives and evidence packets
 knowledge-use receipts and downstream impact analysis
 ```
 
-The model may propose candidates, claims, identities, relationships, questions, and syntheses. It cannot grant authority, activate policy or registries, make final identity decisions, verify itself, close a question, apply a serving directive, change current channel selection, or publish a snapshot.
+The model may propose candidates, claims, identities, relationships, questions, and syntheses. It cannot grant authority, activate policy or registries, make final identity decisions, verify itself, close a question, apply a serving directive, change current channel selection, or publish a snapshot. **design authority only.**
 
 ## State terminology
 
@@ -83,4 +83,4 @@ The model may propose candidates, claims, identities, relationships, questions, 
 
 ## Phase boundary
 
-Draft Phase 3 schemas are registered as non-runtime design contracts. No migration has been added. No policy, registry, candidate import, identity resolution, serving directive, canonical publication, or retrieval projection has been activated. The package remains design authority only and does not authorize Phase 3 runtime behavior.
+Draft Phase 3 schemas are registered as non-runtime design contracts. Migration 18 enables source-registry runtime state now; policy, candidate import, identity resolution, serving directives, canonical publication, and retrieval projection remain deferred. The package still does not authorize unrelated Phase 3 behavior.

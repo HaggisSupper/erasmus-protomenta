@@ -21,7 +21,9 @@ from pathlib import Path
 import pytest
 
 from erasmus.checkpoint import Checkpoint, load_latest_checkpoint, save_checkpoint
-from erasmus.migrations import apply_migrations
+from erasmus.migrations import MIGRATIONS, apply_migrations
+
+LATEST_MIGRATION = max(version for version, _ in MIGRATIONS)
 from erasmus.sleep import consolidate
 from erasmus.store import Store
 
@@ -189,7 +191,7 @@ class TestMigrations:
         count = store.db.execute(
             "SELECT COUNT(*) FROM schema_version"
         ).fetchone()[0]
-        assert count == 17  # exactly seventeen migrations recorded
+        assert count == LATEST_MIGRATION  # latest migration count recorded
 
     def test_real_premission01_upgrade(self, tmp_path):
         """Upgrade from a genuine pre-Mission-01 database with existing data.
@@ -270,7 +272,7 @@ class TestMigrations:
             "SELECT version, applied_at FROM schema_version ORDER BY version"
         ).fetchall()
         versions = [r[0] for r in rows]
-        assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+        assert versions == list(range(1, LATEST_MIGRATION + 1))
         for r in rows:
             assert r[1]  # applied_at provenance timestamp present
 
@@ -290,7 +292,7 @@ class TestMigrations:
         count = store2.db.execute(
             "SELECT COUNT(*) FROM schema_version"
         ).fetchone()[0]
-        assert count == 17  # still exactly seventeen, not duplicated
+        assert count == LATEST_MIGRATION  # still exactly one of each migration, not duplicated
 
         # Idempotent re-run: applying migrations again must return empty list.
         applied = apply_migrations(store2.db)
@@ -601,7 +603,7 @@ class TestRecovery:
         count = store2.db.execute(
             "SELECT COUNT(*) FROM schema_version"
         ).fetchone()[0]
-        assert count == 17  # exactly seventeen migrations recorded, not duplicated
+        assert count == LATEST_MIGRATION  # exactly latest migrations recorded, not duplicated
 
 
 # ---------------------------------------------------------------------------

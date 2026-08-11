@@ -25,6 +25,7 @@ from erasmus.immune import ImmuneCascade
 from erasmus.ledger import EpistemicLedger
 from erasmus.missions import MissionEngine, create_mission
 from erasmus.knowledge_runtime import KnowledgeRuntime
+from erasmus.knowledge_sources import KnowledgeSourceError, KnowledgeSourceRegistry
 from erasmus.review import tenth_man_prompt
 from erasmus.runtime import LocalRuntimeConfig, OpenAICompatibleRuntime, run_session
 from erasmus.skills import SkillPromotionEngine
@@ -38,9 +39,20 @@ from erasmus.tool_registry import (
 )
 
 
+def _load_json_arg(raw: str, name: str) -> dict[str, object]:
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{name} must be valid JSON: {exc}")
+    if not isinstance(payload, dict):
+        raise SystemExit(f"{name} must be a JSON object")
+    return payload
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="erasmus")
     parser.add_argument("--db", default="state/erasmus.db")
+    parser.add_argument("--source-store", default="state/sources")
     parser.add_argument("--tool-cache", default="state/tool-cache")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -146,6 +158,37 @@ def main() -> None:
     knowledge_policy_inspect.add_argument("reference")
     knowledge_policy_evaluate = sub.add_parser("knowledge-policy-evaluate")
     knowledge_policy_evaluate.add_argument("request")
+    knowledge_source_add = sub.add_parser("knowledge-source-add")
+    knowledge_source_add.add_argument("path")
+    knowledge_source_add.add_argument("--scope-json", default="{}")
+    knowledge_source_add.add_argument("--source-kind", default="document")
+    knowledge_source_add.add_argument("--media-type", default="application/octet-stream")
+    knowledge_source_add.add_argument("--acquired-by", default="process:erasmus")
+    knowledge_source_add.add_argument("--actor", default="process:erasmus")
+    for command in (
+        "knowledge-source-inspect",
+        "knowledge-source-verify",
+    ):
+        cmd = sub.add_parser(command)
+        cmd.add_argument("source_id")
+    knowledge_source_list = sub.add_parser("knowledge-source-list")
+    knowledge_source_list.add_argument("--scope-json", default="{}")
+    knowledge_source_tombstone = sub.add_parser("knowledge-source-tombstone")
+    knowledge_source_tombstone.add_argument("source_id")
+    knowledge_source_tombstone.add_argument("--reason", required=True)
+    knowledge_source_span_add = sub.add_parser("knowledge-source-span-add")
+    knowledge_source_span_add.add_argument("source_id")
+    knowledge_source_span_add.add_argument("--start-page", type=int, required=True)
+    knowledge_source_span_add.add_argument("--end-page", type=int, required=True)
+    knowledge_source_span_add.add_argument("--coordinate-json", required=True)
+    knowledge_source_span_add.add_argument("--extracted-text")
+    knowledge_source_span_add.add_argument("--protected-ref")
+    knowledge_source_span_add.add_argument("--scope-json", default="{}")
+    knowledge_source_span_add.add_argument("--actor", default="process:erasmus")
+    knowledge_source_span_inspect = sub.add_parser("knowledge-source-span-inspect")
+    knowledge_source_span_inspect.add_argument("span_id")
+    knowledge_source_span_list = sub.add_parser("knowledge-source-span-list")
+    knowledge_source_span_list.add_argument("source_id")
 
     skill_observe = sub.add_parser("skill-observe")
     skill_observe.add_argument("candidate_id", type=int)
@@ -296,6 +339,7 @@ def main() -> None:
     args = parser.parse_args()
     store = Store(args.db)
     store.init()
+    source_registry = KnowledgeSourceRegistry(store.db, args.source_store)
 
     if args.cmd == "init":
         print(f"initialized {args.db}")
@@ -466,6 +510,56 @@ def main() -> None:
     elif args.cmd == "knowledge-policy-evaluate":
         request = json.loads(Path(args.request).read_text(encoding="utf-8"))
         print(json.dumps(KnowledgeRuntime(store.db).evaluate_policy_request(request), indent=2))
+
+    elif args.cmd == "knowledge-source-add":
+        scope = _load_json_arg(args.scope_json, "scope-json")
+        print(json.dumps(source_registry.register_source(
+            args.path,
+            source_kind=args.source_kind,
+            media_type=args.media_type,
+            scope=scope,
+            actor=args.actor,
+            acquired_by=args.acquired_by,
+        ), indent=2))
+
+    elif args.cmd == "knowledge-source-list":
+        print(json.dumps(
+            source_registry.list_sources(scope=_load_json_arg(args.scope_json, "scope-json")
+            if getattr(args, "scope_json", None) else None),
+            indent=2
+        ))
+
+    elif args.cmd == "knowledge-source-inspect":
+        print(json.dumps(source_registry.inspect_source(args.source_id), indent=2))
+
+    elif args.cmd == "knowledge-source-verify":
+        print(json.dumps(source_registry.verify_source(args.source_id), indent=2))
+
+    elif args.cmd == "knowledge-source-tombstone":
+        print(json.dumps(source_registry.tombstone_source(
+            args.source_id, reason=args.reason
+        ), indent=2))
+
+    elif args.cmd == "knowledge-source-span-add":
+        print(json.dumps(
+            source_registry.register_span(
+                args.source_id,
+                start_page=args.start_page,
+                end_page=args.end_page,
+                coordinate=_load_json_arg(args.coordinate_json, "coordinate-json"),
+                extracted_text=args.extracted_text,
+                protected_ref=args.protected_ref,
+                scope=_load_json_arg(args.scope_json, "scope-json"),
+                actor=args.actor,
+            ),
+            indent=2,
+        ))
+
+    elif args.cmd == "knowledge-source-span-inspect":
+        print(json.dumps(source_registry.inspect_span(args.span_id), indent=2))
+
+    elif args.cmd == "knowledge-source-span-list":
+        print(json.dumps(source_registry.list_spans(args.source_id), indent=2))
 
     elif args.cmd == "skill-observe":
         observation_id = SkillPromotionEngine(store).observe(

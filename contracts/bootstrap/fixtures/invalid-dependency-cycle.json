@@ -1,0 +1,366 @@
+{
+  "plan": {
+    "contract_version": "1.0.0",
+    "plan_id": "plan-bootstrap-cycle-v1",
+    "plan_version": "1.0.0",
+    "installation_context": {
+      "project_context": "erasmus-local",
+      "installer": "manual",
+      "configuration_digest": "5b3e7f1a9d2c4e8a6a8d2f3c9e8a10bd",
+      "platform": "windows",
+      "architecture": "x64"
+    },
+    "required_components": ["sqlite-store", "headless-router", "mistral-rs"],
+    "optional_components": [],
+    "runtime_policy": {
+      "primary_runtime": "mistral-rs",
+      "fallback_runtime": null,
+      "authorized_fallback_override": true
+    },
+    "cumulative_budget_ms": 120000,
+    "retry_budget": 3,
+    "degraded_mode": {
+      "allowed": true,
+      "threshold": 0,
+      "degraded_ready_policy": "warn"
+    },
+    "rollback_order": ["mistral-rs", "headless-router", "sqlite-store"],
+    "stop_condition": {
+      "required_status": "success",
+      "evidence_required": ["jsonl"],
+      "hard_stop_ms": 8000
+    },
+    "evidence_destination": {
+      "record_version": "1.0.0",
+      "append_only": true,
+      "destination_type": "jsonl",
+      "destination": "artifacts/bootstrap-result.jsonl"
+    },
+    "dependency_graph": [
+      {"source": "sqlite-store", "depends_on": ["mistral-rs"]},
+      {"source": "mistral-rs", "depends_on": ["headless-router"]},
+      {"source": "headless-router", "depends_on": ["sqlite-store"]}
+    ]
+  },
+  "components": [
+    {
+      "contract_version": "1.0.0",
+      "component_id": "sqlite-store",
+      "component_kind": "embedded_store",
+      "purpose": "persist mission state and evidence",
+      "required": true,
+      "implementation_reference": {
+        "implementation_id": "sqlite",
+        "exact_tooling_reference": "era.sqlite.engine.v1",
+        "implementation_version": "3.45.0",
+        "digest": "a9c8d7e6f5b4a392"
+      },
+      "platform_constraints": ["windows", "linux"],
+      "architecture_constraints": ["x64"],
+      "configuration_identity": {
+        "config_id": "db-config-v1",
+        "digest": "8a9b6c7d4e3f2a11",
+        "owner": "bootstrap"
+      },
+      "dependencies": ["mistral-rs"],
+      "required_authorities": ["read", "write"],
+      "startup_and_reuse_policy": {
+        "startup_mode": "owned",
+        "startup_timeout_ms": 10000,
+        "probe_identity": "sqlite-health-probe",
+        "reuse_policy": "prohibited",
+        "ownership_required_fields": ["config_digest", "process_id"]
+      },
+      "health_policy": {
+        "probe_capability": "sqlite-health-probe",
+        "required_state": "healthy",
+        "freshness_seconds": 10,
+        "reason_code_required": true
+      },
+      "readiness_policy": {
+        "ready_state": "ready",
+        "allow_degraded_ready": false,
+        "timeout_ms": 1000,
+        "reason_code_required": true
+      },
+      "timeout_budget_ms": {
+        "startup": 12000,
+        "health_probe": 4000,
+        "readiness_probe": 2000,
+        "shutdown": 4000,
+        "force_stop": 1000
+      },
+      "retry_budget": {
+        "max_attempts": 3,
+        "max_total_ms": 30000,
+        "backoff_ms": 250
+      },
+      "shutdown_policy": {
+        "graceful": true,
+        "graceful_ms": 3000,
+        "force_ms": 1000,
+        "requires_authority": "recover"
+      },
+      "recovery_policy": {
+        "allowed_recovery_actions": ["retry_within_budget", "rollback_required"],
+        "required_authority": "recover",
+        "blocked_on_ambiguity": true,
+        "retry_budget_remaining": 3
+      },
+      "side_effects": [],
+      "rollback": {
+        "behavior": "abort",
+        "evidence_needed": ["sqlite-health-evidence"],
+        "ordered": true
+      },
+      "evidence_requirements": {
+        "probe_capability_required": true,
+        "health_readiness_required": true,
+        "recovery_required": false
+      },
+      "secret_and_redaction": {
+        "redact": true,
+        "allowed_secret_fields": ["database_path", "api_key"]
+      },
+      "lifecycle_transitions": [
+        {"from": "discovery", "to": "starting", "bounded_by_ms": 2000},
+        {"from": "starting", "to": "running", "bounded_by_ms": 8000}
+      ],
+      "health_state": "healthy",
+      "readiness_state": "ready"
+    },
+    {
+      "contract_version": "1.0.0",
+      "component_id": "mistral-rs",
+      "component_kind": "managed_process",
+      "purpose": "provide deterministic local inference runtime",
+      "required": true,
+      "implementation_reference": {
+        "implementation_id": "mistral-rs",
+        "exact_tooling_reference": "mistralrs.runtime.v2",
+        "implementation_version": "0.9.0",
+        "digest": "2a1b3c4d5e6f7a8c"
+      },
+      "platform_constraints": ["windows"],
+      "architecture_constraints": ["x64"],
+      "configuration_identity": {
+        "config_id": "mistral-config-v1",
+        "digest": "1b2c3d4e5f6a7b91",
+        "owner": "bootstrap"
+      },
+      "dependencies": ["headless-router"],
+      "required_authorities": ["deploy", "supervise", "recover"],
+      "startup_and_reuse_policy": {
+        "startup_mode": "owned",
+        "startup_timeout_ms": 20000,
+        "probe_identity": "mistral-health-probe",
+        "reuse_policy": "allowed",
+        "ownership_required_fields": ["process_id", "executable_sha", "endpoint", "config_digest"]
+      },
+      "health_policy": {
+        "probe_capability": "mistral-health-probe",
+        "required_state": "healthy",
+        "freshness_seconds": 20,
+        "reason_code_required": true
+      },
+      "readiness_policy": {
+        "ready_state": "degraded_ready",
+        "allow_degraded_ready": true,
+        "timeout_ms": 2000,
+        "reason_code_required": true
+      },
+      "timeout_budget_ms": {
+        "startup": 22000,
+        "health_probe": 4500,
+        "readiness_probe": 3000,
+        "shutdown": 7000,
+        "force_stop": 2000
+      },
+      "retry_budget": {
+        "max_attempts": 2,
+        "max_total_ms": 40000,
+        "backoff_ms": 500
+      },
+      "shutdown_policy": {
+        "graceful": true,
+        "graceful_ms": 5000,
+        "force_ms": 2000,
+        "requires_authority": "rollback"
+      },
+      "recovery_policy": {
+        "allowed_recovery_actions": ["retry_within_budget", "rollback_required", "human_approval_required"],
+        "required_authority": "rollback",
+        "blocked_on_ambiguity": true,
+        "retry_budget_remaining": 1
+      },
+      "side_effects": ["gpu-memory", "worker-threads"],
+      "rollback": {
+        "behavior": "pause",
+        "evidence_needed": ["mistral-readiness-evidence"],
+        "ordered": true
+      },
+      "evidence_requirements": {
+        "probe_capability_required": true,
+        "health_readiness_required": true,
+        "recovery_required": true
+      },
+      "secret_and_redaction": {
+        "redact": true,
+        "allowed_secret_fields": ["model_path", "token"]
+      },
+      "lifecycle_transitions": [
+        {"from": "discovery", "to": "starting", "bounded_by_ms": 4000},
+        {"from": "starting", "to": "running", "bounded_by_ms": 16000}
+      ],
+      "health_state": "healthy",
+      "readiness_state": "degraded_ready"
+    },
+    {
+      "contract_version": "1.0.0",
+      "component_id": "headless-router",
+      "component_kind": "artifact",
+      "purpose": "expose local bootstrap control endpoint and proof stream",
+      "required": true,
+      "implementation_reference": {
+        "implementation_id": "http-router",
+        "exact_tooling_reference": "erasmus.router.v1",
+        "implementation_version": "1.0.0",
+        "digest": "1c2d3e4f5a6b7c80"
+      },
+      "platform_constraints": ["windows"],
+      "architecture_constraints": ["x64"],
+      "configuration_identity": {
+        "config_id": "router-config-v1",
+        "digest": "2b3c4d5e6f7a8b91",
+        "owner": "bootstrap"
+      },
+      "dependencies": ["sqlite-store"],
+      "required_authorities": ["read", "write", "deploy"],
+      "startup_and_reuse_policy": {
+        "startup_mode": "owned",
+        "startup_timeout_ms": 15000,
+        "probe_identity": "router-health-probe",
+        "reuse_policy": "conditional",
+        "ownership_required_fields": ["process_id", "executable_sha", "config_digest", "endpoint"]
+      },
+      "health_policy": {
+        "probe_capability": "router-health-probe",
+        "required_state": "healthy",
+        "freshness_seconds": 15,
+        "reason_code_required": true
+      },
+      "readiness_policy": {
+        "ready_state": "ready",
+        "allow_degraded_ready": false,
+        "timeout_ms": 1500,
+        "reason_code_required": true
+      },
+      "timeout_budget_ms": {
+        "startup": 12000,
+        "health_probe": 3000,
+        "readiness_probe": 1800,
+        "shutdown": 3000,
+        "force_stop": 1000
+      },
+      "retry_budget": {
+        "max_attempts": 3,
+        "max_total_ms": 25000,
+        "backoff_ms": 300
+      },
+      "shutdown_policy": {
+        "graceful": true,
+        "graceful_ms": 2500,
+        "force_ms": 1200,
+        "requires_authority": "supervise"
+      },
+      "recovery_policy": {
+        "allowed_recovery_actions": ["retry_within_budget", "human_approval_required"],
+        "required_authority": "supervise",
+        "blocked_on_ambiguity": true,
+        "retry_budget_remaining": 3
+      },
+      "side_effects": ["ephemeral-port"],
+      "rollback": {
+        "behavior": "continue",
+        "evidence_needed": ["router-readiness-evidence", "router-health-evidence"],
+        "ordered": true
+      },
+      "evidence_requirements": {
+        "probe_capability_required": true,
+        "health_readiness_required": true,
+        "recovery_required": false
+      },
+      "secret_and_redaction": {
+        "redact": true,
+        "allowed_secret_fields": ["api_key", "password"]
+      },
+      "lifecycle_transitions": [
+        {"from": "discovery", "to": "starting", "bounded_by_ms": 3000},
+        {"from": "starting", "to": "running", "bounded_by_ms": 11000}
+      ],
+      "health_state": "healthy",
+      "readiness_state": "ready"
+    }
+  ],
+  "service_observations": [
+    {
+      "component_id": "sqlite-store",
+      "observation_type": "health",
+      "observation_time": "2026-08-11T10:40:31Z",
+      "lifecycle_state": "running",
+      "probe_capability": "sqlite-health-probe",
+      "result": "healthy",
+      "reason_code": "sqlite.health.ok",
+      "health_evidence": {
+        "redacted": true,
+        "references": ["evid/sqlite.health.001"]
+      },
+      "evidence_references": ["evid/sqlite.health.001"],
+      "config_digest": "8a9b6c7d4e3f2a11",
+      "dependency_states": {},
+      "uncertainty": "low",
+      "freshness_until": "2026-08-11T10:41:31Z",
+      "bounded_by_ms": 1000,
+      "provenance_identity": {
+        "status": "owned",
+        "evidence": {
+          "executable_digest": "a9c8d7e6f5b4a392",
+          "endpoint": "file://state/sqlite",
+          "model_identity": "embedded-store"
+        }
+      }
+    }
+  ],
+  "recovery_decisions": [],
+  "bootstrap_result": {
+    "contract_version": "1.0.0",
+    "run_id": "run-cycle-001",
+    "plan_id": "plan-bootstrap-cycle-v1",
+    "plan_digest": "9e7a6b5c4d3f2a10",
+    "status": "failed",
+    "started_at": "2026-08-11T10:40:00Z",
+    "finished_at": "2026-08-11T10:41:00Z",
+    "discovered_components": ["sqlite-store", "mistral-rs", "headless-router"],
+    "reused_components": [],
+    "started_components": [],
+    "stopped_components": [],
+    "ordered_component_transitions": [],
+    "health_observations": ["evid/sqlite.health.001"],
+    "readiness_observations": [],
+    "recovery_decisions": [],
+    "authorities": ["deploy", "supervise", "recover", "rollback", "read", "write"],
+    "timings_ms": {
+      "boot": 60000,
+      "startup": 55000,
+      "health": 2000,
+      "readiness": 1000,
+      "recovery": 0
+    },
+    "degraded_count": 0,
+    "blocked_count": 0,
+    "rollback_actions": [],
+    "final_expected_state": "blocked",
+    "stop_reason": "dependency cycle detected",
+    "result_jsonl_version": "1.0.0"
+  }
+}

@@ -1,0 +1,417 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haggisSupper/erasmus-protomenta/contracts/bootstrap/component-spec.schema.json",
+  "title": "Bootstrap component specification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "component_id",
+    "component_kind",
+    "purpose",
+    "required",
+    "implementation_reference",
+    "platform_constraints",
+    "architecture_constraints",
+    "configuration_identity",
+    "dependencies",
+    "required_authorities",
+    "startup_and_reuse_policy",
+    "health_policy",
+    "readiness_policy",
+    "timeout_budget_ms",
+    "retry_budget",
+    "shutdown_policy",
+    "recovery_policy",
+    "side_effects",
+    "rollback",
+    "evidence_requirements",
+    "secret_and_redaction",
+    "lifecycle_transitions",
+    "health_state",
+    "readiness_state"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "component_id": {
+      "type": "string",
+      "minLength": 4,
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]{2,63})$"
+    },
+    "component_kind": {
+      "type": "string",
+      "enum": [
+        "managed_process",
+        "reusable_external_process",
+        "embedded_store",
+        "executable_dependency",
+        "configuration",
+        "artifact"
+      ]
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 8
+    },
+    "required": {
+      "type": "boolean"
+    },
+    "implementation_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implementation_id", "exact_tooling_reference", "implementation_version", "digest"],
+      "properties": {
+        "implementation_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "exact_tooling_reference": {
+          "type": "string",
+          "minLength": 1
+        },
+        "implementation_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "minLength": 8
+        }
+      }
+    },
+    "platform_constraints": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": ["windows", "linux", "darwin"]
+      }
+    },
+    "architecture_constraints": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": ["x64", "x86", "arm64"]
+      }
+    },
+    "configuration_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config_id", "digest", "owner"],
+      "properties": {
+        "config_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{8,128}$"
+        },
+        "owner": {
+          "type": "string",
+          "enum": ["bootstrap", "external", "system"]
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 4
+      },
+      "uniqueItems": true
+    },
+    "required_authorities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["read", "write", "deploy", "supervise", "recover", "rollback"]
+      }
+    },
+    "startup_and_reuse_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startup_mode", "startup_timeout_ms", "probe_identity", "reuse_policy", "ownership_required_fields"],
+      "properties": {
+        "startup_mode": {
+          "type": "string",
+          "enum": ["owned", "reuse", "observe_only"]
+        },
+        "startup_timeout_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "probe_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reuse_policy": {
+          "type": "string",
+          "enum": ["prohibited", "conditional", "allowed"]
+        },
+        "ownership_required_fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["process_id", "executable_sha", "config_digest", "endpoint"]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "health_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["probe_capability", "required_state", "freshness_seconds", "reason_code_required"],
+      "properties": {
+        "probe_capability": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_state": {
+          "type": "string",
+          "enum": ["unknown", "healthy", "degraded", "unhealthy", "blocked", "not_applicable"]
+        },
+        "freshness_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason_code_required": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "readiness_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ready_state", "allow_degraded_ready", "timeout_ms", "reason_code_required"],
+      "properties": {
+        "ready_state": {
+          "type": "string",
+          "enum": ["ready", "degraded_ready", "blocked", "not_ready"]
+        },
+        "allow_degraded_ready": {
+          "type": "boolean"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason_code_required": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "timeout_budget_ms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startup",
+        "health_probe",
+        "readiness_probe",
+        "shutdown",
+        "force_stop"
+      ],
+      "properties": {
+        "startup": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "health_probe": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "readiness_probe": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "shutdown": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "force_stop": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "retry_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_attempts", "max_total_ms", "backoff_ms"],
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "max_total_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "backoff_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "shutdown_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["graceful", "graceful_ms", "force_ms", "requires_authority"],
+      "properties": {
+        "graceful": {
+          "type": "boolean"
+        },
+        "graceful_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "force_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requires_authority": {
+          "type": "string",
+          "enum": ["recover", "supervise", "rollback"]
+        }
+      }
+    },
+    "recovery_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_recovery_actions", "required_authority", "blocked_on_ambiguity", "retry_budget_remaining"],
+      "properties": {
+        "allowed_recovery_actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "retry_within_budget",
+              "restart_owned_process",
+              "stop_owned_process",
+              "safe_reuse",
+              "resume_interrupted_mission",
+              "remove_stale_lock",
+              "rollback_required",
+              "human_approval_required"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "required_authority": {
+          "type": "string",
+          "enum": ["recover", "rollback", "supervise", "human"]
+        },
+        "blocked_on_ambiguity": {
+          "type": "boolean",
+          "const": true
+        },
+        "retry_budget_remaining": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "side_effects": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["behavior", "evidence_needed"],
+      "properties": {
+        "behavior": {
+          "type": "string",
+          "enum": ["continue", "abort", "restart", "pause", "rollback"]
+        },
+        "evidence_needed": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "ordered": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "evidence_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["probe_capability_required", "health_readiness_required", "recovery_required"],
+      "properties": {
+        "probe_capability_required": {
+          "type": "boolean",
+          "const": true
+        },
+        "health_readiness_required": {
+          "type": "boolean",
+          "const": true
+        },
+        "recovery_required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "secret_and_redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["redact", "allowed_secret_fields"],
+      "properties": {
+        "redact": {
+          "type": "boolean"
+        },
+        "allowed_secret_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["api_key", "token", "password", "model_path", "database_path"]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "lifecycle_transitions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "bounded_by_ms"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "bounded_by_ms": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "health_state": {
+      "type": "string",
+      "enum": ["unknown", "healthy", "degraded", "unhealthy", "blocked", "not_applicable"]
+    },
+    "readiness_state": {
+      "type": "string",
+      "enum": ["not_ready", "ready", "degraded_ready", "blocked"]
+    }
+  }
+}

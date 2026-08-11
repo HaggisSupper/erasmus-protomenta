@@ -134,3 +134,7 @@ The additional accepted requirements for Erasmus as a persistent engineering ope
 - [`docs/requirements/ERASMUS_ENGINEERING_PLATFORM_REQUIREMENTS_ADDENDUM.md`](requirements/ERASMUS_ENGINEERING_PLATFORM_REQUIREMENTS_ADDENDUM.md)
 
 The addendum covers the bootstrap control plane, persistent runtime kernel, durable engineering memory, graph-grounded world model, executable skill library, deterministic tool layer, agent quality gates, technical reconnaissance, local-first inference, multi-agent council, and eventual engineering-platform scope. It is subordinate to this development track and does not authorize broad implementation. Each requirement must be promoted independently through a bounded mission in architectural dependency order.
+
+Bootstrap contract governance for issue #67 is also recorded in:
+
+- [`docs/adr/ADR-BOOTSTRAP-001-contract-before-supervisor.md`](adr/ADR-BOOTSTRAP-001-contract-before-supervisor.md)

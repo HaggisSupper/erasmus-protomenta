@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haggisSupper/erasmus-protomenta/contracts/bootstrap/bootstrap-result.schema.json",
+  "title": "Bootstrap attempt result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "run_id",
+    "plan_id",
+    "plan_digest",
+    "status",
+    "started_at",
+    "finished_at",
+    "discovered_components",
+    "reused_components",
+    "started_components",
+    "stopped_components",
+    "ordered_component_transitions",
+    "health_observations",
+    "readiness_observations",
+    "recovery_decisions",
+    "authorities",
+    "timings_ms",
+    "rollback_actions",
+    "final_expected_state",
+    "stop_reason",
+    "result_jsonl_version"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 5
+    },
+    "plan_digest": {
+      "type": "string",
+      "minLength": 8
+    },
+    "status": {
+      "type": "string",
+      "enum": ["success", "degraded", "blocked", "rollback", "failed"]
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "discovered_components": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 4
+      },
+      "uniqueItems": true
+    },
+    "reused_components": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 4
+      },
+      "uniqueItems": true
+    },
+    "started_components": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 4
+      },
+      "uniqueItems": true
+    },
+    "stopped_components": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 4
+      },
+      "uniqueItems": true
+    },
+    "ordered_component_transitions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component_id", "from_state", "to_state", "duration_ms", "reason_code"],
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 4
+          },
+          "from_state": {
+            "type": "string"
+          },
+          "to_state": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason_code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "health_observations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "readiness_observations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "recovery_decisions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 8
+      }
+    },
+    "authorities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["read", "write", "deploy", "supervise", "recover", "rollback", "human"]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "timings_ms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boot", "startup", "health", "readiness", "recovery"],
+      "properties": {
+        "boot": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "startup": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "health": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "readiness": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recovery": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "degraded_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "blocked_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rollback_actions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "final_expected_state": {
+      "type": "string",
+      "enum": ["running", "ready", "stopped", "blocked", "rollback"]
+    },
+    "stop_reason": {
+      "type": "string",
+      "minLength": 0
+    },
+    "result_jsonl_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    }
+  },
+  "if": {
+    "properties": {
+      "status": {
+        "const": "blocked"
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "stop_reason": {
+        "minLength": 8
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "stop_reason": {
+        "maxLength": 0
+      }
+    }
+  }
+}

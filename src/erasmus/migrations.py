@@ -1213,7 +1213,86 @@ MIGRATIONS: list[tuple[int, str]] = [
             UNIQUE(request_id, operation, mission_id)
         );
         CREATE INDEX knowledge_jobs_lookup_idx
-        ON knowledge_jobs(state, operation);
+            ON knowledge_jobs(state, operation);
+        """,
+    ),
+    (
+        18,
+        # P3.1 source registry foundation: append-only source artifacts, spans,
+        # and extraction receipts with deterministic IDs.
+        """
+        CREATE TABLE knowledge_source_events(
+            event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL UNIQUE,
+            event_type TEXT NOT NULL,
+            aggregate_type TEXT NOT NULL,
+            aggregate_id TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            payload_digest_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE knowledge_sources(
+            source_id TEXT PRIMARY KEY,
+            event_seq INTEGER NOT NULL UNIQUE,
+            sha256 TEXT NOT NULL UNIQUE,
+            media_type TEXT NOT NULL,
+            byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+            source_kind TEXT NOT NULL,
+            locator TEXT NOT NULL,
+            local_path TEXT NOT NULL UNIQUE,
+            scope_json TEXT NOT NULL,
+            storage_state TEXT NOT NULL CHECK(
+                storage_state IN ('available', 'external', 'tombstoned', 'removed')
+            ),
+            metadata_json TEXT NOT NULL,
+            acquired_by TEXT NOT NULL,
+            acquired_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            retired_at TEXT,
+            FOREIGN KEY(event_seq) REFERENCES knowledge_source_events(event_seq)
+        );
+        CREATE TABLE knowledge_extraction_receipts(
+            receipt_id TEXT PRIMARY KEY,
+            event_seq INTEGER NOT NULL UNIQUE,
+            source_id TEXT NOT NULL,
+            extractor_json TEXT NOT NULL,
+            options_json TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('requested', 'complete', 'failed')),
+            output_digest_json TEXT,
+            detail_json TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(event_seq) REFERENCES knowledge_source_events(event_seq),
+            FOREIGN KEY(source_id) REFERENCES knowledge_sources(source_id)
+        );
+        CREATE TABLE knowledge_source_spans(
+            span_id TEXT PRIMARY KEY,
+            event_seq INTEGER NOT NULL UNIQUE,
+            source_id TEXT NOT NULL,
+            coordinate_json TEXT NOT NULL,
+            text_digest_json TEXT NOT NULL,
+            extracted_text TEXT,
+            protected_ref TEXT,
+            extraction_receipt_id TEXT NOT NULL,
+            scope_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            start_page INTEGER NOT NULL CHECK(start_page >= 1),
+            end_page INTEGER NOT NULL CHECK(end_page >= start_page),
+            FOREIGN KEY(event_seq) REFERENCES knowledge_source_events(event_seq),
+            FOREIGN KEY(source_id) REFERENCES knowledge_sources(source_id),
+            FOREIGN KEY(extraction_receipt_id) REFERENCES knowledge_extraction_receipts(receipt_id),
+            CHECK((extracted_text IS NULL) != (protected_ref IS NULL))
+        );
+        CREATE TABLE knowledge_source_tombstones(
+            source_id TEXT PRIMARY KEY,
+            event_seq INTEGER NOT NULL UNIQUE,
+            actor TEXT NOT NULL,
+            reason_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(source_id) REFERENCES knowledge_sources(source_id),
+            FOREIGN KEY(event_seq) REFERENCES knowledge_source_events(event_seq)
+        );
         """,
     ),
 ]

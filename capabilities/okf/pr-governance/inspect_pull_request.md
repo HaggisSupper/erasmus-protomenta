@@ -4,4 +4,4 @@
 
 # Relationships
 
-Requires [Git repository inspection](/inspect_git_repository.md).
+Requires [Git repository inspection](inspect_git_repository.md).

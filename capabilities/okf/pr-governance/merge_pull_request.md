@@ -4,9 +4,9 @@
 
 # Relationships
 
-Requires [pull-request inspection](/inspect_pull_request.md), [tests](/run_tests.md),
-[10th-Man review](/invoke_tenth_man_review.md), and
-[human approval](/request_human_approval.md).
+Requires [pull-request inspection](inspect_pull_request.md), [tests](run_tests.md),
+[10th-Man review](invoke_tenth_man_review.md), and
+[human approval](request_human_approval.md).
 
 # Rollback
 

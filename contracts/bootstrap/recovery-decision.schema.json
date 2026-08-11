@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haggisSupper/erasmus-protomenta/contracts/bootstrap/recovery-decision.schema.json",
+  "title": "Bootstrap recovery decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "classification",
+    "decision_id",
+    "observed_failure",
+    "required_authority",
+    "permitted_actions",
+    "retry_count",
+    "retry_budget_remaining",
+    "resulting_expected_state",
+    "rollback_point",
+    "required_component_ids"
+  ],
+  "properties": {
+    "classification": {
+      "type": "string",
+      "enum": [
+        "no_action_required",
+        "safe_reuse",
+        "retry_within_budget",
+        "restart_owned_process",
+        "stop_owned_process",
+        "resume_interrupted_mission",
+        "stale_lock_removal",
+        "orphaned_process",
+        "incomplete_migration",
+        "partially_written_state",
+        "rollback_required",
+        "human_approval_required",
+        "blocked"
+      ]
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "observed_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failure_code", "evidence_references"],
+      "properties": {
+        "failure_code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_references": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        }
+      }
+    },
+    "required_authority": {
+      "type": "string",
+      "enum": ["recover", "rollback", "supervise", "human"]
+    },
+    "permitted_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "retry_within_budget",
+          "restart_owned_process",
+          "stop_owned_process",
+          "resume_interrupted_mission",
+          "remove_stale_lock",
+          "rollback_required",
+          "human_approval_required",
+          "safe_reuse"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "prohibited_actions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "retry_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "retry_budget_remaining": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rollback_point": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resulting_expected_state": {
+      "type": "string",
+      "enum": ["stopped", "running", "awaiting_human", "rollback", "retrying"]
+    },
+    "required_component_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 4
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "proof"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["owned", "compatible", "external", "unknown"]
+        },
+        "proof": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+    "blocked_reason": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

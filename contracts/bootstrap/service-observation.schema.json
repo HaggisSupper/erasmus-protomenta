@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haggisSupper/erasmus-protomenta/contracts/bootstrap/service-observation.schema.json",
+  "title": "Bootstrap component service observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "component_id",
+    "observation_type",
+    "observation_time",
+    "lifecycle_state",
+    "provenance_identity",
+    "result",
+    "reason_code",
+    "evidence_references",
+    "config_digest",
+    "dependency_states",
+    "bounded_by_ms",
+    "freshness_until"
+  ],
+  "properties": {
+    "component_id": {
+      "type": "string",
+      "minLength": 4
+    },
+    "observation_type": {
+      "type": "string",
+      "enum": ["health", "readiness", "recovery", "provenance"]
+    },
+    "observation_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lifecycle_state": {
+      "type": "string",
+      "enum": ["discovery", "starting", "running", "stopping", "stopped", "exited", "orphaned"]
+    },
+    "probe_capability": {
+      "type": "string",
+      "minLength": 1
+    },
+    "result": {
+      "type": "string",
+      "enum": ["unknown", "healthy", "degraded", "unhealthy", "blocked", "not_applicable", "not_ready", "ready", "degraded_ready"]
+    },
+    "reason_code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "health_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["redacted", "references"],
+      "properties": {
+        "redacted": {
+          "type": "boolean"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "evidence_references": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "config_digest": {
+      "type": "string",
+      "minLength": 8
+    },
+    "dependency_states": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "discovery",
+          "starting",
+          "running",
+          "ready",
+          "degraded_ready",
+          "stopped",
+          "exited",
+          "orphaned",
+          "unknown"
+        ]
+      }
+    },
+    "uncertainty": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "freshness_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "bounded_by_ms": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "provenance_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["owned", "compatible", "compatible_externally", "external_only", "unknown"]
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["executable_digest", "endpoint", "model_identity"],
+          "properties": {
+            "executable_digest": {
+              "type": "string",
+              "minLength": 8
+            },
+            "endpoint": {
+              "type": "string",
+              "minLength": 1
+            },
+            "model_identity": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -41,7 +41,7 @@ REQUIRED_SCHEMAS = {
 LINKED_OUTSIDE_PACKAGE = {
     ROOT / "docs" / "architecture" / "okf-knowledge-foundry.md",
     ROOT / "docs" / "DEVELOPMENT_TRACK.md",
-    ROOT / "docs" / "roadmap" / "ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md",
+    ROOT / "docs" / "roadmap" / "ERASMUS_IMPLEMENTATION_ROADMAP.md",
     ROOT / "docs" / "adr" / "ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md",
     ROOT / "docs" / "superpowers" / "specs" / "2026-08-09-phase-3-knowledge-system-design.md",
 }
@@ -158,12 +158,10 @@ def test_phase3_design_package_is_complete_and_indexed() -> None:
         assert f"](schemas/{name})" in index
 
     assert "**Draft schema registration:** Registered" in index
-    assert "**Database migration:** None" in index
-    assert "**Runtime activation:** None" in index
+    assert "**Database migration:** Migration 18" in index
     assert (
-        "No migration has been added. No policy, registry, candidate import, "
-        "identity resolution, serving directive, canonical publication, or "
-        "retrieval projection has been activated."
+        "**Runtime activation:** Source registry commands and persistence layer are "
+        "active; policy/candidate/serving features are still deferred"
     ) in index
 
 
@@ -1210,7 +1208,7 @@ def test_publication_ddl_reselects_without_duplicating_snapshot_identity() -> No
 
 def test_invalidation_and_directive_lifecycle_precede_publication_and_retrieval() -> None:
     roadmap = (
-        ROOT / "docs" / "roadmap" / "ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md"
+        ROOT / "docs" / "roadmap" / "ERASMUS_IMPLEMENTATION_ROADMAP.md"
     ).read_text(encoding="utf-8")
     edges = _roadmap_edges(roadmap)
     assert _has_path(edges, "P8A", "P8B")
@@ -1589,7 +1587,7 @@ def test_phase3_authority_and_source_of_truth_boundaries_are_concrete() -> None:
 
 def test_phase3_roadmap_contains_every_prerequisite_and_remains_non_authorizing() -> None:
     roadmap = (
-        ROOT / "docs" / "roadmap" / "ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md"
+        ROOT / "docs" / "roadmap" / "ERASMUS_IMPLEMENTATION_ROADMAP.md"
     ).read_text(encoding="utf-8")
     design_index = (PACKAGE / "README.md").read_text(encoding="utf-8")
     foundry = (ROOT / "docs" / "architecture" / "okf-knowledge-foundry.md").read_text(

@@ -78,7 +78,7 @@ The complete target design is documented in:
 - [`docs/architecture/knowledge-system/STORAGE_PROJECTION_AND_RETRIEVAL.md`](architecture/knowledge-system/STORAGE_PROJECTION_AND_RETRIEVAL.md)
 - [`docs/architecture/knowledge-system/SECURITY_PRIVACY_AND_GOVERNANCE.md`](architecture/knowledge-system/SECURITY_PRIVACY_AND_GOVERNANCE.md)
 - [`docs/architecture/knowledge-system/TEST_AND_ACCEPTANCE_PLAN.md`](architecture/knowledge-system/TEST_AND_ACCEPTANCE_PLAN.md)
-- [`docs/roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md`](roadmap/ERASMUS_PHASE_3_KNOWLEDGE_EVOLUTION.md)
+- [`docs/roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md`](roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md#track-b-knowledge-system-evolution)
 - [`docs/adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md`](adr/ADR-KNOWLEDGE-001-authoritative-state-and-okf-publication.md)
 
 The target keeps the existing epistemic ledger authoritative for proposition truth state, adds append-only records for concept/revision/review/publication governance, emits immutable OKF v0.2 publication snapshots, and treats lexical, vector, graph, cache, and UI stores as rebuildable projections.
@@ -122,7 +122,7 @@ The accepted target architecture for adaptive problem routing and experience-gui
 
 - [`docs/architecture/erasmus-routing/ERASMUS_FINAL_SPEC.md`](architecture/erasmus-routing/ERASMUS_FINAL_SPEC.md)
 - [`docs/architecture/erasmus-routing/CONTRACT_CATALOGUE.md`](architecture/erasmus-routing/CONTRACT_CATALOGUE.md)
-- [`docs/roadmap/ERASMUS_ROUTING_EVOLUTION.md`](roadmap/ERASMUS_ROUTING_EVOLUTION.md)
+- [`docs/roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md`](roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md#track-c-adaptive-routing-evolution)
 - [`docs/adr/ADR-ROUTING-001-adaptive-routing-as-deferred-extension.md`](adr/ADR-ROUTING-001-adaptive-routing-as-deferred-extension.md)
 
 This target does not alter the locked Phase 1–3 sequence or authorize implementation. Its namespaced schemas are experimental and non-authoritative. Any promoted increment requires a concrete observed need, a fresh bounded mission, additive or versioned contracts, disabled-by-default or observation-only rollout where applicable, deterministic and negative tests, rollback, 10th-Man review, and preservation of the current deterministic fallback.
@@ -131,7 +131,7 @@ This target does not alter the locked Phase 1–3 sequence or authorize implemen
 
 The additional accepted requirements for Erasmus as a persistent engineering operating platform are documented in:
 
-- [`docs/requirements/ERASMUS_ENGINEERING_PLATFORM_REQUIREMENTS_ADDENDUM.md`](requirements/ERASMUS_ENGINEERING_PLATFORM_REQUIREMENTS_ADDENDUM.md)
+- [`docs/roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md`](roadmap/ERASMUS_IMPLEMENTATION_ROADMAP.md#track-a-engineering-platform-foundation)
 
 The addendum covers the bootstrap control plane, persistent runtime kernel, durable engineering memory, graph-grounded world model, executable skill library, deterministic tool layer, agent quality gates, technical reconnaissance, local-first inference, multi-agent council, and eventual engineering-platform scope. It is subordinate to this development track and does not authorize broad implementation. Each requirement must be promoted independently through a bounded mission in architectural dependency order.
 

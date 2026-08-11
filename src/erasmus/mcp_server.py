@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import sys
+import sqlite3
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
 from erasmus.capability_runtime import query_sqlite_fts
+from erasmus.status_surface import collect_status_snapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +51,11 @@ class ErasmusMcpServer:
                 return None
             if method == "tools/list":
                 return self._result(request_id, {"tools": [
-                    {"name": "erasmus_status", "description": "Read-only Erasmus governance status.", "inputSchema": {"type": "object", "properties": {}}},
+                    {
+                        "name": "erasmus_status",
+                        "description": "Read-only Erasmus governance status.",
+                        "inputSchema": {"type": "object", "properties": {"database": {"type": "string"}}},
+                    },
                     {"name": "retrieve_ieee_evidence", "description": "Read licensed IEEE evidence from an allowed SQLite FTS index.", "inputSchema": {"type": "object", "required": ["database", "table", "query"], "properties": {"database": {"type": "string"}, "table": {"type": "string"}, "query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}}},
                 ]})
             if method == "tools/call":
@@ -64,7 +70,29 @@ class ErasmusMcpServer:
         if not isinstance(arguments, dict):
             raise ValueError("tool arguments must be an object")
         if name == "erasmus_status":
-            return {"content": [{"type": "text", "text": json.dumps({"state": "ready", "authority": "erasmus", "read_only": True})}]}
+            db_path = arguments.get("database")
+            root = Path(self.allowed_roots[0]).resolve()
+            candidate = Path(db_path or "erasmus.db")
+            if not candidate.is_absolute():
+                candidate = root / candidate
+            candidate = candidate.resolve()
+            snapshot = {"state": "not_available", "authority": "erasmus", "read_only": True}
+            if not candidate.is_relative_to(root):
+                return {"content": [{"type": "text", "text": json.dumps(snapshot)}]}
+            if candidate.is_file():
+                try:
+                    with sqlite3.connect(str(candidate)) as connection:
+                        payload = collect_status_snapshot(connection)
+                        snapshot = {
+                            "authority": "erasmus",
+                            "read_only": True,
+                            "source_db": str(candidate),
+                            "state": "ready",
+                            **payload,
+                        }
+                except Exception:
+                    snapshot = {"state": "error", "authority": "erasmus", "read_only": True}
+            return {"content": [{"type": "text", "text": json.dumps(snapshot)}]}
         if name == "retrieve_ieee_evidence":
             request = EvidenceRequest.from_arguments(arguments)
             rows = query_sqlite_fts(self.allowed_roots)(asdict(request))["rows"]

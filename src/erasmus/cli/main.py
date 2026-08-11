@@ -30,6 +30,7 @@ from erasmus.runtime import LocalRuntimeConfig, OpenAICompatibleRuntime, run_ses
 from erasmus.skills import SkillPromotionEngine
 from erasmus.sleep import consolidate, decide_candidate, sleep_report
 from erasmus.store import Store
+from erasmus.status_surface import collect_status_snapshot
 from erasmus.tool_registry import (
     ToolRegistry,
     load_tool_manifest,
@@ -300,52 +301,7 @@ def main() -> None:
         print(f"initialized {args.db}")
 
     elif args.cmd == "status":
-        tables = [
-            "events",
-            "propositions",
-            "epistemic_evidence",
-            "proposition_transitions",
-            "missions",
-            "experience_candidates",
-            "sleep_runs",
-            "sleep_items",
-            "sleep_candidates",
-            "immune_state",
-            "immune_incidents",
-            "immune_findings",
-            "checkpoints",
-            "local_runtime_sessions",
-            "runtime_identity_changes",
-            "divergence_windows",
-            "divergence_calibrations",
-            "divergence_recommendations",
-            "divergence_evaluations",
-            "skill_observations",
-            "skill_artifacts",
-            "skill_transitions",
-            "skill_evaluations",
-            "adapter_readiness_exports",
-            "sessions",
-            "capabilities",
-            "capability_plans",
-            "capability_evidence",
-            "tool_manifests",
-            "tool_audit",
-        ]
-        output = {
-            table: store.db.execute(
-                f"SELECT COUNT(*) FROM {table}"  # noqa: S608
-            ).fetchone()[0]
-            for table in tables
-        }
-        versions = [
-            row[0]
-            for row in store.db.execute(
-                "SELECT version FROM schema_version ORDER BY version"
-            ).fetchall()
-        ]
-        output["schema_versions"] = versions
-        print(json.dumps(output, indent=2))
+        print(json.dumps(collect_status_snapshot(store.db), indent=2))
 
     elif args.cmd == "sleep":
         print(json.dumps(consolidate(store), indent=2))

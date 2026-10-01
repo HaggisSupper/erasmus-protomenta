@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from unittest.mock import patch
 
 from erasmus.work_package import WorkPackage
@@ -8,9 +9,12 @@ from erasmus.worker_mcp import WorkerMcpServer
 
 def test_worker_provenance_can_be_recorded_in_state_packet(tmp_path):
     server = WorkerMcpServer((tmp_path,))
-    with patch(
-        "erasmus.worker_mcp.subprocess.run",
-        return_value=subprocess.CompletedProcess([], 0, "ok", ""),
+    with (
+        patch("erasmus.worker_mcp.shutil.which", return_value=sys.executable),
+        patch(
+            "erasmus.worker_mcp.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "ok", ""),
+        ),
     ):
         result = server.call(
             "worker_review",

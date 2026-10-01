@@ -46,3 +46,13 @@ def test_enforcer_requires_configured_allowed_roots():
     with pytest.raises(ContractViolation, match="no allowed roots configured"):
         enforcer.check_root("C:\\")
 
+
+
+def test_snapshot_digest_mapping_cannot_be_changed(tmp_path):
+    from erasmus.contract_enforcer import ContractSnapshot
+    raw = {"contract": "original"}
+    snapshot = ContractSnapshot(tmp_path, raw)
+    raw["contract"] = "changed"
+    assert snapshot.digests["contract"] == "original"
+    with pytest.raises(TypeError):
+        snapshot.digests["contract"] = "changed"

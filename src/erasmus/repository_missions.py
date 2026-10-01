@@ -8,7 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -658,20 +658,30 @@ class RepositoryMissionService:
         store: Store,
         runner: LocalGitRunner | None = None,
         authority_rules: list[dict] | None = None,
+        reviewer: Callable[[str, str, str], Mapping[str, str]] | None = None,
     ) -> None:
         self.store = store
+        self.reviewer = reviewer
         self.runner = runner or LocalGitRunner()
         self.authority_rules = [dict(rule) for rule in (authority_rules or [])]
         self.capabilities = CapabilityGraph(store.db)
         try:
             self.capabilities.export_manifest()
         except LookupError:
-            self.capabilities.import_bundle(
+            bundle = (
                 Path(__file__).resolve().parents[2]
                 / "capabilities"
                 / "okf"
                 / "pr-governance"
             )
+            if not bundle.is_dir():
+                bundle = (
+                    Path(__file__).resolve().parent
+                    / "capabilities"
+                    / "okf"
+                    / "pr-governance"
+                )
+            self.capabilities.import_bundle(bundle)
 
     def create(
         self,
@@ -1043,6 +1053,39 @@ class RepositoryMissionService:
                 prompt = tenth_man_prompt(
                     f"Repository mission {contract.identifier} at HEAD {head} with diff {diff_digest}"
                 )
+                if self.reviewer is None:
+                    self._transition_terminal(
+                        mission_id,
+                        "blocked",
+                        "reviewer-produced evidence is required",
+                        head,
+                    )
+                    raise RepositoryMissionError(
+                        "reviewer-produced evidence is required"
+                    )
+                review = self.reviewer(head, diff_digest, prompt)
+                if (
+                    not isinstance(review, Mapping)
+                    or any(
+                        review.get(key) != expected
+                        for key, expected in {
+                            "reviewer": contract.reviewer,
+                            "head_sha": head,
+                            "diff_digest": diff_digest,
+                        }.items()
+                    )
+                    or not str(review.get("countercase", "")).strip()
+                ):
+                    self._transition_terminal(
+                        mission_id,
+                        "blocked",
+                        "reviewer attestation does not match this HEAD and diff",
+                        head,
+                    )
+                    raise RepositoryMissionError(
+                        "reviewer attestation does not match this HEAD and diff"
+                    )
+                countercase = str(review["countercase"])
                 capability_review_id = self._record_capability_evidence(
                     review_step,
                     {
@@ -1053,7 +1096,7 @@ class RepositoryMissionService:
                             prompt.encode("utf-8")
                         ).hexdigest(),
                     },
-                    {"countercase": contract.countercase, "decision": "await_human"},
+                    {"countercase": countercase, "decision": "await_human"},
                     "success",
                     head,
                 )
@@ -1063,7 +1106,7 @@ class RepositoryMissionService:
                     {
                         "reviewer": contract.reviewer,
                         "authority": contract.reviewer_authority,
-                        "countercase": contract.countercase,
+                        "countercase": countercase,
                         "decision": "await_human",
                         "head_sha": head,
                         "diff_digest": diff_digest,

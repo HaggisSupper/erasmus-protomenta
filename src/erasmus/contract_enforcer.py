@@ -7,6 +7,7 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 
@@ -90,7 +91,10 @@ class ContractEnforcer:
 @dataclass(frozen=True)
 class ContractSnapshot:
     root: Path
-    digests: dict[str, str]
+    digests: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "digests", MappingProxyType(dict(self.digests)))
 
 
 def _files(root: Path) -> tuple[Path, ...]:

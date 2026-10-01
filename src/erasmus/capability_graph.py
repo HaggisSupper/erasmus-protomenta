@@ -17,6 +17,8 @@ EDGE_TYPES = {
 CLASS_ORDER = {"deterministic": 0, "statistical": 1, "semantic": 2}
 ROOT = Path(__file__).parents[2]
 SCHEMA_PATH = ROOT / "capabilities" / "contracts" / "capability.schema.json"
+if not SCHEMA_PATH.is_file():
+    SCHEMA_PATH = Path(__file__).parent / "capabilities" / "contracts" / "capability.schema.json"
 
 
 class GraphValidationError(ValueError):

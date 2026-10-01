@@ -33,3 +33,17 @@ def test_get_requires_login():
         assert "login required" in str(error)
     else:
         raise AssertionError("expected login guard")
+
+
+def test_external_and_parent_endpoints_are_rejected_before_network():
+    from unittest.mock import Mock
+
+    import pytest
+
+    client = AcumaticaClient("https://example.invalid/entity/", "test", "test")
+    client._logged_in = True
+    client._opener = Mock()
+    for endpoint in ("https://attacker.invalid/data", "../secret", "%2e%2e/secret"):
+        with pytest.raises(AcumaticaError, match="outside"):
+            client.get(endpoint)
+    client._opener.open.assert_not_called()

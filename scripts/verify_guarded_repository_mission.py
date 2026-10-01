@@ -128,7 +128,18 @@ def main() -> None:
                 "effect": "allow",
             },
         ]
-        service = RepositoryMissionService(store, authority_rules=rules)
+        service = RepositoryMissionService(
+            store,
+            authority_rules=rules,
+            reviewer=lambda head, digest, prompt: {
+                "reviewer": "manual-worker-reviewer"
+                if "manual-worker" in prompt
+                else "manual-declared-reviewer",
+                "head_sha": head,
+                "diff_digest": digest,
+                "countercase": "Independent fixture review cannot exercise hosted branch protection.",
+            },
+        )
 
         declared_id = service.create(
             contract(

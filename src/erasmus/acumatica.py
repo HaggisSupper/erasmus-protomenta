@@ -6,8 +6,13 @@ import json
 from dataclasses import dataclass
 from http.cookiejar import CookieJar
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin
-from urllib.request import HTTPCookieProcessor, Request, build_opener
+from urllib.parse import unquote, urlencode, urljoin, urlsplit
+from urllib.request import (
+    HTTPCookieProcessor,
+    HTTPRedirectHandler,
+    Request,
+    build_opener,
+)
 
 
 class AcumaticaError(RuntimeError):
@@ -19,6 +24,13 @@ class AcumaticaResult:
     status: int
     body: object
     truncated: bool = False
+
+
+class ContainedRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise AcumaticaError(
+            "Acumatica redirects are disabled to preserve URL containment"
+        )
 
 
 class AcumaticaClient:
@@ -39,7 +51,9 @@ class AcumaticaClient:
         self.tenant = tenant
         self.timeout = max(1, timeout)
         self.max_bytes = max(1024, max_bytes)
-        self._opener = build_opener(HTTPCookieProcessor(CookieJar()))
+        self._opener = build_opener(
+            HTTPCookieProcessor(CookieJar()), ContainedRedirectHandler()
+        )
         self._logged_in = False
 
     def login(self) -> None:
@@ -66,8 +80,18 @@ class AcumaticaClient:
 
     def _request(self, method: str, path: str, payload: object) -> AcumaticaResult:
         data = json.dumps(payload).encode() if payload is not None else None
+        resolved = urljoin(self.base_url, path)
+        base, target = urlsplit(self.base_url), urlsplit(resolved)
+        decoded_path = unquote(target.path)
+        if (
+            (target.scheme, target.netloc) != (base.scheme, base.netloc)
+            or not decoded_path.startswith(base.path)
+            or ".." in decoded_path.split("/")
+            or "\\" in decoded_path
+        ):
+            raise AcumaticaError("endpoint is outside the configured Acumatica base")
         request = Request(
-            urljoin(self.base_url, path),
+            resolved,
             data=data,
             method=method,
             headers={"Accept": "application/json", "Content-Type": "application/json"},

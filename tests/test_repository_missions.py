@@ -416,6 +416,12 @@ def mission_service(
     return RepositoryMissionService(
         store,
         authority_rules=authority_rules(repository, process=process, review=review),
+        reviewer=lambda head, digest, prompt: {
+            "reviewer": "reviewer-beta",
+            "head_sha": head,
+            "diff_digest": digest,
+            "countercase": "Independent fixture review: hosted protections remain outside this fixture.",
+        },
     )
 
 
@@ -1000,3 +1006,31 @@ def test_legacy_mission_migration_preserves_data_and_timestamp(tmp_path, monkeyp
     assert db.execute(
         "SELECT name FROM sqlite_master WHERE name='knowledge_policy_sets'"
     ).fetchone()
+
+
+def test_creator_countercase_cannot_replace_reviewer_evidence(tmp_path: Path) -> None:
+    repository, _remote, base = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    service.reviewer = None
+    contract = mission_contract(repository, base)
+    mission_id = service.create(contract, "Protomentat", "repository:execute")
+    with pytest.raises(RepositoryMissionError, match="reviewer-produced evidence"):
+        service.run(mission_id)
+    assert service.inspect(mission_id)["state"] == "blocked"
+
+
+def test_reviewer_attestation_must_match_exact_head_and_diff(tmp_path: Path) -> None:
+    repository, _remote, base = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    service.reviewer = lambda head, digest, prompt: {
+        "reviewer": "reviewer-beta",
+        "head_sha": "wrong-head",
+        "diff_digest": digest,
+        "countercase": "Independent evidence for a different commit",
+    }
+    mission_id = service.create(
+        mission_contract(repository, base), "Protomentat", "repository:execute"
+    )
+    with pytest.raises(RepositoryMissionError, match="attestation"):
+        service.run(mission_id)
+    assert service.inspect(mission_id)["state"] == "blocked"

@@ -6,11 +6,6 @@ import ast
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-try:
-    from tree_sitter_language_pack import get_parser
-except ImportError:
-    get_parser = None
-
 
 @dataclass(frozen=True)
 class Symbol:
@@ -58,7 +53,7 @@ class Navigator:
             "root": str(self.root),
             "symbols": [asdict(s) for s in symbols],
             "imports": imports,
-            "backend": "tree-sitter+python-ast" if get_parser else "python-ast",
+            "backend": "python-ast",
             "readonly": True,
         }
 

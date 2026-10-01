@@ -61,3 +61,13 @@ def test_mcp_stdio_framing_and_notification_suppression():
     lines = output_stream.getvalue().splitlines()
     assert len(lines) == 1
     assert json.loads(lines[0])["id"] == 2
+
+
+def test_stdio_parse_error_does_not_stop_next_request():
+    server = ErasmusMcpServer(("state",))
+    incoming = io.StringIO("invalid-json\n" + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "initialize"}) + "\n")
+    outgoing = io.StringIO()
+    server.serve(incoming, outgoing)
+    responses = [json.loads(line) for line in outgoing.getvalue().splitlines()]
+    assert responses[0]["error"]["code"] == -32700
+    assert responses[1]["id"] == 2

@@ -8,6 +8,7 @@ database unchanged and the version is not recorded.
 
 Consumers call :func:`apply_migrations` after opening a connection.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -1295,6 +1296,103 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        19,
+        """
+        CREATE TABLE repository_missions(
+            id INTEGER PRIMARY KEY,
+            identifier TEXT NOT NULL UNIQUE,
+            objective TEXT NOT NULL,
+            workspace_root TEXT NOT NULL,
+            repository_root TEXT NOT NULL,
+            expected_base_sha TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            allowed_paths_json TEXT NOT NULL,
+            patch_source TEXT NOT NULL CHECK(patch_source IN ('declared', 'worker')),
+            contract_json TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN (
+                'created', 'authorized', 'inspecting', 'branched',
+                'patch_validated', 'changed', 'tested', 'reviewed',
+                'draft_pr_recorded', 'awaiting_human', 'blocked',
+                'quarantined', 'failed', 'rolled_back'
+            )),
+            actor TEXT NOT NULL,
+            authority TEXT NOT NULL,
+            current_head TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE repository_mission_evidence(
+            id INTEGER PRIMARY KEY,
+            mission_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            digest TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(mission_id) REFERENCES repository_missions(id)
+        );
+        CREATE TABLE repository_mission_transitions(
+            id INTEGER PRIMARY KEY,
+            mission_id INTEGER NOT NULL,
+            from_state TEXT,
+            to_state TEXT NOT NULL CHECK(to_state IN (
+                'created', 'authorized', 'inspecting', 'branched',
+                'patch_validated', 'changed', 'tested', 'reviewed',
+                'draft_pr_recorded', 'awaiting_human', 'blocked',
+                'quarantined', 'failed', 'rolled_back'
+            )),
+            actor TEXT NOT NULL,
+            authority TEXT NOT NULL,
+            repository_head TEXT,
+            reason TEXT NOT NULL,
+            evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(mission_id) REFERENCES repository_missions(id)
+        );
+        CREATE TABLE draft_pull_requests(
+            id INTEGER PRIMARY KEY,
+            mission_id INTEGER NOT NULL UNIQUE,
+            status TEXT NOT NULL CHECK(status = 'awaiting_human'),
+            base_sha TEXT NOT NULL,
+            head_sha TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            changed_paths_json TEXT NOT NULL,
+            patch_digest TEXT NOT NULL,
+            test_command_json TEXT NOT NULL,
+            test_exit_status INTEGER NOT NULL,
+            test_output_digest TEXT NOT NULL,
+            reviewer TEXT NOT NULL,
+            countercase TEXT NOT NULL,
+            rollback_sha TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(mission_id) REFERENCES repository_missions(id)
+        );
+        CREATE INDEX repository_missions_status_idx ON repository_missions(status);
+        CREATE INDEX repository_mission_transitions_mission_idx
+            ON repository_mission_transitions(mission_id, id);
+        CREATE INDEX repository_mission_evidence_mission_idx
+            ON repository_mission_evidence(mission_id, id);
+        CREATE INDEX draft_pull_requests_status_idx ON draft_pull_requests(status);
+        CREATE TRIGGER repository_mission_transitions_no_update
+        BEFORE UPDATE ON repository_mission_transitions
+        BEGIN SELECT RAISE(ABORT, 'repository mission transitions are append-only'); END;
+        CREATE TRIGGER repository_mission_transitions_no_delete
+        BEFORE DELETE ON repository_mission_transitions
+        BEGIN SELECT RAISE(ABORT, 'repository mission transitions are append-only'); END;
+        CREATE TRIGGER repository_mission_evidence_no_update
+        BEFORE UPDATE ON repository_mission_evidence
+        BEGIN SELECT RAISE(ABORT, 'repository mission evidence is append-only'); END;
+        CREATE TRIGGER repository_mission_evidence_no_delete
+        BEFORE DELETE ON repository_mission_evidence
+        BEGIN SELECT RAISE(ABORT, 'repository mission evidence is append-only'); END;
+        CREATE TRIGGER draft_pull_requests_no_update
+        BEFORE UPDATE ON draft_pull_requests
+        BEGIN SELECT RAISE(ABORT, 'draft pull requests are append-only'); END;
+        CREATE TRIGGER draft_pull_requests_no_delete
+        BEFORE DELETE ON draft_pull_requests
+        BEGIN SELECT RAISE(ABORT, 'draft pull requests are append-only'); END;
+        """,
+    ),
 ]
 
 
@@ -1310,6 +1408,39 @@ def _split_statements(sql: str) -> list[str]:
     if pending.strip():
         statements.append(pending.strip())
     return statements
+
+
+def upgrade_legacy_repository_mission_migration(db: sqlite3.Connection) -> None:
+    """Reconcile the branch-only migration 17 with the mainline ledger.
+
+    Mainline migrations 17 and 18 keep their published identity. The older
+    guarded-mission branch used 17 for its own additive tables; recognize that
+    exact legacy shape and move only its ledger identity to 19 before applying
+    the missing mainline migrations. Existing data and timestamps stay intact.
+    """
+    tables = {
+        row[0]
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if (
+        not {
+            "repository_missions",
+            "repository_mission_evidence",
+            "repository_mission_transitions",
+            "draft_pull_requests",
+        }
+        <= tables
+        or "knowledge_policy_sets" in tables
+    ):
+        return
+    if (
+        db.execute("SELECT 1 FROM schema_version WHERE version = 17").fetchone()
+        and not db.execute(
+            "SELECT 1 FROM schema_version WHERE version >= 18"
+        ).fetchone()
+    ):
+        with db:
+            db.execute("UPDATE schema_version SET version = 19 WHERE version = 17")
 
 
 def apply_migrations(db: sqlite3.Connection) -> list[int]:
@@ -1341,6 +1472,7 @@ def apply_migrations(db: sqlite3.Connection) -> list[int]:
     )
     db.commit()
 
+    upgrade_legacy_repository_mission_migration(db)
     rows = db.execute("SELECT version FROM schema_version").fetchall()
     applied_versions: set[int] = {row[0] for row in rows}
 
@@ -1359,3 +1491,26 @@ def apply_migrations(db: sqlite3.Connection) -> list[int]:
         newly_applied.append(version)
 
     return newly_applied
+
+
+def rollback_repository_mission_migration(db: sqlite3.Connection) -> None:
+    """Remove only the additive guarded-repository-mission schema.
+
+    This is an explicit offline rollback. Repository branches and commits are
+    separate Git state and are intentionally not modified here.
+    """
+    with db:
+        for statement in (
+            "DROP TRIGGER IF EXISTS repository_mission_transitions_no_update",
+            "DROP TRIGGER IF EXISTS repository_mission_transitions_no_delete",
+            "DROP TRIGGER IF EXISTS repository_mission_evidence_no_update",
+            "DROP TRIGGER IF EXISTS repository_mission_evidence_no_delete",
+            "DROP TRIGGER IF EXISTS draft_pull_requests_no_update",
+            "DROP TRIGGER IF EXISTS draft_pull_requests_no_delete",
+            "DROP TABLE IF EXISTS draft_pull_requests",
+            "DROP TABLE IF EXISTS repository_mission_transitions",
+            "DROP TABLE IF EXISTS repository_mission_evidence",
+            "DROP TABLE IF EXISTS repository_missions",
+        ):
+            db.execute(statement)
+        db.execute("DELETE FROM schema_version WHERE version = 19")

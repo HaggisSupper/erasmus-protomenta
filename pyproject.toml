@@ -11,12 +11,14 @@ dependencies = [
   "jsonschema>=4.10.0,<5",
   "cryptography>=46.0.0,<47",
   "pypdf>=5.0.0,<6",
+  "tree-sitter-language-pack==1.12.5",
 ]
 
 [project.scripts]
 erasmus = "erasmus.cli.main:main"
 erasmus-mcp = "erasmus.mcp_server:main"
 erasmus-foundry = "erasmus.foundry_cli:main"
+erasmus-worker-mcp = "erasmus.worker_mcp:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/erasmus"]
@@ -24,6 +26,8 @@ packages = ["src/erasmus"]
 [tool.hatch.build.targets.wheel.force-include]
 "contracts/mission.schema.json" = "erasmus/contracts/mission.schema.json"
 "contracts/immune-agent.schema.json" = "erasmus/contracts/immune-agent.schema.json"
+
+"contracts/repository-mission.schema.json" = "erasmus/contracts/repository-mission.schema.json"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

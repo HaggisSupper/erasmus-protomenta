@@ -460,6 +460,8 @@ def test_declared_repository_mission_reaches_awaiting_human_and_pushes_branch(
     review_evidence = next(
         item for item in result["evidence"] if item["kind"] == "review"
     )
+    assert result["draft_pr"]["countercase"] == review_evidence["data"]["countercase"]
+    assert result["draft_pr"]["countercase"] != contract.countercase
     test_evidence = next(item for item in result["evidence"] if item["kind"] == "test")
     assert review_evidence["data"]["head_sha"] == result["draft_pr"]["head_sha"]
     assert (
@@ -1201,3 +1203,70 @@ def test_independent_clone_recreates_new_untracked_patch_files(tmp_path: Path) -
     )
     mission_id = service.create(contract, "Protomentat", "repository:execute")
     assert service.run(mission_id)["state"] == "awaiting_human"
+
+
+@pytest.mark.parametrize("identity", ["implementer", "reviewer"])
+def test_contract_rejects_whitespace_identity(tmp_path: Path, identity: str) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    with pytest.raises(RepositoryMissionError, match="nonempty"):
+        RepositoryMissionContract.from_dict(
+            contract_data(repository, **{identity: "   "})
+        )
+
+
+def test_inspection_service_does_not_bootstrap_capabilities(tmp_path: Path) -> None:
+    store = Store(tmp_path / "inspect.sqlite")
+    store.init()
+    before = store.db.iterdump()
+    before_dump = list(before)
+    service = RepositoryMissionService(store)
+    with pytest.raises(RepositoryMissionError):
+        service.inspect(999)
+    assert list(store.db.iterdump()) == before_dump
+
+
+def test_patch_accepts_submodule_like_text_content(tmp_path: Path) -> None:
+    repository, _, head = repository_with_bare_origin(tmp_path)
+    contract = RepositoryMissionContract.from_dict(
+        contract_data(
+            repository,
+            expected_base_sha=head,
+            declared_patch=contract_data(repository)["declared_patch"].replace(
+                "+after", "+160000 Subproject commit harmless text"
+            ),
+        )
+    )
+    PatchGate(LocalGitRunner()).validate_and_apply(
+        repository, contract.declared_patch, contract.allowed_paths, head
+    )
+
+
+def test_edit_after_tests_cannot_be_staged_as_tested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, origin, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    contract = mission_contract(repository, head)
+    mission_id = service.create(contract, "Protomentat", "repository:execute")
+    original = service._run_test_command
+
+    def race(active_contract: RepositoryMissionContract):
+        result = original(active_contract)
+        (repository / "fixture.txt").write_text("untested\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(service, "_run_test_command", race)
+    with pytest.raises(RepositoryMissionError, match="changed after tests"):
+        service.run(mission_id)
+    assert service.inspect(mission_id)["state"] == "blocked"
+    assert (repository / "fixture.txt").read_text() == "untested\n"
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", f"refs/heads/{contract.branch}"],
+            cwd=origin,
+            capture_output=True,
+            check=False,
+        ).returncode
+        != 0
+    )

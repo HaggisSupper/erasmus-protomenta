@@ -18,7 +18,7 @@ def test_worker_provenance_can_be_recorded_in_state_packet(tmp_path):
     ):
         result = server.call(
             "worker_review",
-            {"project_root": str(tmp_path), "worker": "agy", "prompt": "review"},
+            {"project_root": str(tmp_path), "worker": "codex", "prompt": "review"},
         )
     packet = WorkPackage(
         "wp-1",

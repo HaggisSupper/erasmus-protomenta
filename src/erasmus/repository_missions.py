@@ -229,9 +229,6 @@ def _parse_patch_paths(patch_text: str) -> tuple[str, ...]:
         or "Binary files " in patch_text
     ):
         raise RepositoryMissionError("binary patches are not supported")
-    if "160000" in patch_text or "Subproject commit " in patch_text:
-        raise RepositoryMissionError("submodule patches are not supported")
-
     paths: set[str] = set()
     saw_diff = False
     section_has_file_headers = False
@@ -303,6 +300,8 @@ def _parse_patch_paths(patch_text: str) -> tuple[str, ...]:
             "dissimilarity index ",
         )
         if line.startswith(metadata):
+            if line.split()[-1] == "160000":
+                raise RepositoryMissionError("submodule patches are not supported")
             if line.startswith(
                 (
                     "new file mode 120000",
@@ -681,6 +680,8 @@ class RepositoryMissionContract:
 
         implementer = str(raw["implementer"]).strip()
         reviewer = str(raw["reviewer"]).strip()
+        if not implementer or not reviewer:
+            raise RepositoryMissionError("implementer and reviewer must be nonempty")
         if implementer.casefold() == reviewer.casefold():
             raise RepositoryMissionError(
                 "reviewer must be independent from implementer"
@@ -786,6 +787,8 @@ class RepositoryMissionService:
         self.runner = runner or LocalGitRunner()
         self.authority_rules = [dict(rule) for rule in (authority_rules or [])]
         self.capabilities = CapabilityGraph(store.db)
+
+    def _ensure_capabilities(self) -> None:
         try:
             self.capabilities.export_manifest()
         except LookupError:
@@ -1075,7 +1078,15 @@ class RepositoryMissionService:
                         (failure_id, rollback_id),
                     )
                     raise
-                expected_tree = self._prepare_commit_tree(contract)
+                try:
+                    expected_tree = self._prepare_commit_tree(
+                        contract, repository_snapshot
+                    )
+                except RepositoryMissionError as exc:
+                    self._transition_terminal(
+                        mission_id, "blocked", str(exc), contract.expected_base_sha
+                    )
+                    raise
                 capability_evidence_id = self._record_capability_evidence(
                     test_step,
                     {
@@ -1378,6 +1389,7 @@ class RepositoryMissionService:
         return result
 
     def _capability_step(self, goal: str, authorities: set[str], head_sha: str) -> Any:
+        self._ensure_capabilities()
         plans = self.capabilities.plan(goal, authorities, head_sha)
         if len(plans) != 1 or not plans[0].steps:
             raise RepositoryMissionError(
@@ -1699,6 +1711,24 @@ class RepositoryMissionService:
         raise RepositoryMissionError(f"worker patch provider failed: {last_error}")
 
     def _repository_snapshot(self, repository: Path) -> dict[str, object]:
+        file_names = self._git_output(
+            repository,
+            ("ls-files", "-z", "--cached", "--others", "--exclude-standard"),
+            "snapshot file content paths",
+        ).split("\x00")
+        content_records: list[tuple[str, str]] = []
+        for relative in sorted(set(file_names) - {""}):
+            file = repository / relative
+            if file.is_symlink():
+                digest = "symlink:" + os.readlink(file)
+            elif file.is_file():
+                digest = hashlib.sha256(file.read_bytes()).hexdigest()
+            else:
+                digest = "absent-or-directory"
+            content_records.append((relative, digest))
+        worktree_digest = hashlib.sha256(
+            json.dumps(content_records, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
         branch = self._git_output(
             repository, ("branch", "--show-current"), "snapshot branch"
         ).strip()
@@ -1752,6 +1782,7 @@ class RepositoryMissionService:
             "untracked": untracked_digests,
         }
         return {
+            "worktree_digest": worktree_digest,
             "branch": branch,
             "head": head,
             "index_tree": index_tree,
@@ -1962,7 +1993,13 @@ class RepositoryMissionService:
         output = (completed.stdout or "") + (completed.stderr or "")
         return completed, output, canonical_before
 
-    def _prepare_commit_tree(self, contract: RepositoryMissionContract) -> str:
+    def _prepare_commit_tree(
+        self, contract: RepositoryMissionContract, tested_snapshot: Mapping[str, object]
+    ) -> str:
+        if self._repository_snapshot(contract.repository_root) != tested_snapshot:
+            raise RepositoryMissionError(
+                "repository changed after tests before staging"
+            )
         added = self.runner.run(
             contract.repository_root, ("add", "--", *contract.allowed_paths)
         )
@@ -1970,9 +2007,21 @@ class RepositoryMissionService:
             raise RepositoryMissionError(
                 f"unable to stage mission paths: {added.stderr[:500]}"
             )
-        return self._git_output(
+        expected_tree = self._git_output(
             contract.repository_root, ("write-tree",), "record expected commit tree"
         ).strip()
+        after = self._repository_snapshot(contract.repository_root)
+        expected = dict(tested_snapshot)
+        expected["index_tree"] = expected_tree
+        # Staging moves new files from untracked evidence into the HEAD diff.
+        # Their exact bytes remain covered by the stable worktree digest.
+        after.pop("diff_digest")
+        expected.pop("diff_digest")
+        if after != expected:
+            raise RepositoryMissionError(
+                "repository changed after tests during staging"
+            )
+        return expected_tree
 
     def _rollback_owned_changes(
         self, mission_id: int, contract: RepositoryMissionContract, test_id: int

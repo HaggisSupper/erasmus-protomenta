@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
+import os
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -91,6 +97,75 @@ class LocalGitRunner:
             ) from exc
 
 
+def _run_bounded_test(
+    command: tuple[str, ...], cwd: Path, timeout: int, limit: int = 65536
+) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        list(command),
+        cwd=cwd,
+        shell=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=os.name != "nt",
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if os.name == "nt"
+        else 0,
+    )
+    output = bytearray()
+    exceeded = threading.Event()
+
+    def consume() -> None:
+        assert process.stdout is not None
+        while chunk := process.stdout.read(4096):
+            remaining = limit - len(output)
+            output.extend(chunk[:remaining])
+            if len(chunk) > remaining:
+                exceeded.set()
+                break
+
+    reader = threading.Thread(target=consume, daemon=True)
+    reader.start()
+    deadline = time.monotonic() + timeout
+    reason = ""
+    while process.poll() is None:
+        if exceeded.is_set() or time.monotonic() >= deadline:
+            reason = (
+                "test output limit exceeded"
+                if exceeded.is_set()
+                else "test command timed out"
+            )
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=10,
+                )
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if process.poll() is None:
+                process.kill()
+            break
+        time.sleep(0.01)
+    process.wait(timeout=10)
+    reader.join(timeout=5)
+    if exceeded.is_set():
+        reason = "test output limit exceeded"
+    if process.stdout is not None:
+        process.stdout.close()
+    return subprocess.CompletedProcess(
+        list(command),
+        -1 if reason else process.returncode,
+        output.decode("utf-8", errors="replace"),
+        reason,
+    )
+
+
 def _command_evidence(
     args: tuple[str, ...], completed: subprocess.CompletedProcess[str]
 ) -> GitCommandEvidence:
@@ -107,6 +182,13 @@ def _command_evidence(
 
 
 def _safe_relative_git_path(raw_path: str, *, label: str) -> str:
+    if raw_path.startswith('"'):
+        try:
+            raw_path = ast.literal_eval(raw_path)
+        except (SyntaxError, ValueError) as exc:
+            raise RepositoryMissionError("malformed quoted patch path") from exc
+        if not isinstance(raw_path, str):
+            raise RepositoryMissionError("malformed quoted patch path")
     if raw_path in {"", "/dev/null"}:
         if raw_path == "/dev/null":
             return raw_path
@@ -122,6 +204,11 @@ def _safe_relative_git_path(raw_path: str, *, label: str) -> str:
 
 
 def _prefixed_patch_path(token: str, prefix: str, *, label: str) -> str:
+    if token.startswith('"'):
+        try:
+            token = ast.literal_eval(token)
+        except (SyntaxError, ValueError) as exc:
+            raise RepositoryMissionError("malformed quoted patch path") from exc
     if token == "/dev/null":
         return token
     if not token.startswith(prefix):
@@ -162,11 +249,21 @@ def _parse_patch_paths(patch_text: str) -> tuple[str, ...]:
     for line in patch_text.splitlines():
         if line.startswith("diff --git "):
             finish_section()
-            tokens = line.split(" ")
-            if len(tokens) != 4 or tokens[:2] != ["diff", "--git"]:
-                raise RepositoryMissionError("malformed diff --git header")
-            old_path = _prefixed_patch_path(tokens[2], "a/", label="diff")
-            new_path = _prefixed_patch_path(tokens[3], "b/", label="diff")
+            header = line[len("diff --git ") :]
+            if header.startswith('"'):
+                tokens = shlex.split(header, posix=False)
+                if len(tokens) != 2:
+                    raise RepositoryMissionError("malformed diff --git header")
+            else:
+                left, separator, right = header.partition(" b/")
+                if not separator:
+                    tokens = shlex.split(header, posix=False)
+                    if len(tokens) != 2:
+                        raise RepositoryMissionError("malformed diff --git header")
+                else:
+                    tokens = [left, "b/" + right]
+            old_path = _prefixed_patch_path(tokens[0], "a/", label="diff")
+            new_path = _prefixed_patch_path(tokens[1], "b/", label="diff")
             paths.update((old_path, new_path))
             saw_diff = True
             section_has_file_headers = False
@@ -181,13 +278,17 @@ def _parse_patch_paths(patch_text: str) -> tuple[str, ...]:
         if in_hunk:
             continue
         if line.startswith("--- "):
-            path = _prefixed_patch_path(line[4:], "a/", label="old file")
+            path = _prefixed_patch_path(
+                line[4:].split("\t", 1)[0], "a/", label="old file"
+            )
             if path != "/dev/null":
                 paths.add(path)
             section_has_file_headers = True
             continue
         if line.startswith("+++ "):
-            path = _prefixed_patch_path(line[4:], "b/", label="new file")
+            path = _prefixed_patch_path(
+                line[4:].split("\t", 1)[0], "b/", label="new file"
+            )
             if path != "/dev/null":
                 paths.add(path)
             section_has_file_headers = True
@@ -202,6 +303,17 @@ def _parse_patch_paths(patch_text: str) -> tuple[str, ...]:
             "dissimilarity index ",
         )
         if line.startswith(metadata):
+            if line.startswith(
+                (
+                    "new file mode 120000",
+                    "new mode 120000",
+                    "new file mode 160000",
+                    "new mode 160000",
+                )
+            ):
+                raise RepositoryMissionError(
+                    "symbolic links and Git links are forbidden in mission patches"
+                )
             continue
         for prefix, marker in (
             ("rename from ", "from"),
@@ -273,6 +385,11 @@ class PatchGate:
                 f"repository HEAD does not match expected HEAD {expected_head}"
             )
         status_args = ("status", "--porcelain", "--untracked-files=normal")
+        ignored = self.runner.run(root, ("check-ignore", "--", *allowed_paths))
+        if ignored.returncode == 0:
+            raise RepositoryMissionError("ignored mission paths are forbidden")
+        if ignored.returncode not in (0, 1):
+            raise RepositoryMissionError("unable to check ignored mission paths")
         status = run(status_args)
         if status.returncode != 0:
             raise RepositoryMissionError("unable to inspect repository cleanliness")
@@ -536,6 +653,10 @@ class RepositoryMissionContract:
                 "repository_root resolves outside workspace_root"
             )
 
+        if repository_root == workspace_root:
+            raise RepositoryMissionError(
+                "workspace_root must be a parent of repository_root for isolated tests"
+            )
         allowed_paths: list[str] = []
         for value in raw["allowed_paths"]:  # type: ignore[union-attr]
             path = str(value)
@@ -1044,9 +1165,13 @@ class RepositoryMissionService:
                 patch_data = self._evidence_data(mission_id, "patch")
                 diff_digest = str(patch_data["repository_snapshot"]["diff_digest"])
                 exact_review_scope = f"{head}:{diff_digest}"
-                self._require_authority(
-                    contract.reviewer, "independent_review", exact_review_scope
-                )
+                try:
+                    self._require_authority(
+                        contract.reviewer, "independent_review", exact_review_scope
+                    )
+                except RepositoryMissionError as exc:
+                    self._transition_terminal(mission_id, "blocked", str(exc), head)
+                    raise
                 review_step = self._capability_step(
                     "obtain_countercase", {"review:request"}, head
                 )
@@ -1063,7 +1188,13 @@ class RepositoryMissionService:
                     raise RepositoryMissionError(
                         "reviewer-produced evidence is required"
                     )
-                review = self.reviewer(head, diff_digest, prompt)
+                try:
+                    review = self.reviewer(head, diff_digest, prompt)
+                except Exception as exc:
+                    self._transition_terminal(
+                        mission_id, "blocked", "reviewer provider failed", head
+                    )
+                    raise RepositoryMissionError("reviewer provider failed") from exc
                 if (
                     not isinstance(review, Mapping)
                     or any(
@@ -1211,6 +1342,12 @@ class RepositoryMissionService:
                 "after confirming the mission branch"
             ),
             "rollback_args": [
+                [
+                    "update-ref",
+                    f"refs/heads/{row['branch']}",
+                    row["expected_base_sha"],
+                    row["current_head"],
+                ],
                 [
                     "restore",
                     "--source",
@@ -1753,34 +1890,59 @@ class RepositoryMissionService:
             ignore_cleanup_errors=True,
         ) as temporary:
             sandbox = Path(temporary) / "repository"
-            shutil.copytree(
-                contract.repository_root,
-                sandbox,
-                copy_function=shutil.copyfile,
+            cloned = self.runner.run(
+                contract.workspace_root,
+                (
+                    "clone",
+                    "--no-local",
+                    "--no-hardlinks",
+                    "--",
+                    str(contract.repository_root),
+                    str(sandbox),
+                ),
             )
+            if cloned.returncode != 0:
+                raise RepositoryMissionError("unable to create independent test clone")
+            branches = self.runner.run(
+                contract.repository_root,
+                (
+                    "for-each-ref",
+                    "--format=%(refname:short) %(objectname)",
+                    "refs/heads",
+                ),
+            )
+            current = self.runner.run(
+                sandbox, ("branch", "--show-current")
+            ).stdout.strip()
+            for record in branches.stdout.splitlines():
+                branch, sha = record.split(" ", 1)
+                if branch != current:
+                    self.runner.run(sandbox, ("branch", branch, sha))
             self.runner.run(sandbox, ("remote", "remove", "origin"))
+            self.runner.run(sandbox, ("config", "user.name", "Erasmus test sandbox"))
+            self.runner.run(sandbox, ("config", "user.email", "test@localhost"))
+            for relative in contract.allowed_paths:
+                source = (contract.repository_root / relative).resolve()
+                destination = (sandbox / relative).resolve()
+                if not source.is_relative_to(
+                    contract.repository_root
+                ) or not destination.is_relative_to(sandbox):
+                    raise RepositoryMissionError(
+                        "test copy path escapes its repository"
+                    )
+                if source.is_file():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source, destination)
+                elif not source.exists() and destination.is_file():
+                    destination.unlink()
+                elif source.exists():
+                    raise RepositoryMissionError(
+                        "mission test paths must be regular files"
+                    )
             sandbox_before = self._repository_snapshot(sandbox)
-            try:
-                completed = subprocess.run(
-                    list(contract.test_command),
-                    cwd=sandbox,
-                    shell=False,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=contract.test_timeout,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as exc:
-                stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-                stderr = exc.stderr if isinstance(exc.stderr, str) else ""
-                completed = subprocess.CompletedProcess(
-                    list(contract.test_command),
-                    -1,
-                    stdout=stdout,
-                    stderr=stderr + "\ntest command timed out",
-                )
+            completed = _run_bounded_test(
+                contract.test_command, sandbox, contract.test_timeout
+            )
             sandbox_after = self._repository_snapshot(sandbox)
             if sandbox_after["head"] != sandbox_before["head"]:
                 parents = self._git_output(
@@ -1967,6 +2129,28 @@ class RepositoryMissionService:
     def _record_draft(
         self, mission_id: int, contract: RepositoryMissionContract
     ) -> None:
+        review = self._evidence_data(mission_id, "review")
+        actual_head = self._git_output(
+            contract.repository_root, ("rev-parse", "HEAD"), "revalidate reviewed HEAD"
+        ).strip()
+        status = self._git_output(
+            contract.repository_root,
+            ("status", "--porcelain"),
+            "revalidate reviewed tree",
+        ).strip()
+        branch = self._git_output(
+            contract.repository_root,
+            ("branch", "--show-current"),
+            "revalidate reviewed branch",
+        ).strip()
+        if actual_head != review["head_sha"] or status or branch != contract.branch:
+            self._transition_terminal(
+                mission_id,
+                "blocked",
+                "reviewed repository changed before draft",
+                actual_head,
+            )
+            raise RepositoryMissionError("reviewed repository changed before draft")
         patch = self._evidence_data(mission_id, "patch")
         test = self._evidence_data(mission_id, "test")
         head = self._git_output(
@@ -1980,7 +2164,7 @@ class RepositoryMissionService:
             "patch_digest": patch["patch_digest"],
             "test_output_digest": test["output_digest"],
             "reviewer": contract.reviewer,
-            "countercase": contract.countercase,
+            "countercase": review["countercase"],
             "rollback_sha": contract.expected_base_sha,
         }
         draft_evidence_id = self._store_evidence(mission_id, "draft_pr", draft_data)
@@ -2005,7 +2189,7 @@ class RepositoryMissionService:
                     test["exit_status"],
                     test["output_digest"],
                     contract.reviewer,
-                    contract.countercase,
+                    str(review["countercase"]),
                     contract.expected_base_sha,
                 ),
             )

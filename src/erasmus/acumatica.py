@@ -42,9 +42,17 @@ class AcumaticaClient:
         tenant: str | None = None,
         timeout: int = 30,
         max_bytes: int = 1_000_000,
+        allow_insecure_loopback: bool = False,
     ):
-        if not base_url.startswith(("http://", "https://")):
-            raise ValueError("base_url must use http or https")
+        parsed = urlsplit(base_url)
+        if parsed.scheme != "https" and not (
+            allow_insecure_loopback
+            and parsed.scheme == "http"
+            and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        ):
+            raise ValueError(
+                "base_url must use HTTPS; HTTP requires explicit loopback development mode"
+            )
         self.base_url = base_url.rstrip("/") + "/"
         self.username = username
         self.password = password
@@ -103,6 +111,8 @@ class AcumaticaClient:
         except (HTTPError, URLError, TimeoutError) as error:
             raise AcumaticaError(str(error)) from error
         truncated = len(raw) > self.max_bytes
+        if truncated:
+            raise AcumaticaError("Acumatica response exceeds configured size limit")
         raw = raw[: self.max_bytes]
         if not raw:
             return AcumaticaResult(status, None, truncated)

@@ -1035,3 +1035,169 @@ def test_reviewer_attestation_must_match_exact_head_and_diff(tmp_path: Path) -> 
     with pytest.raises(RepositoryMissionError, match="attestation"):
         service.run(mission_id)
     assert service.inspect(mission_id)["state"] == "blocked"
+
+
+def test_independent_test_clone_does_not_change_linked_worktree_remote(
+    tmp_path: Path,
+) -> None:
+    repository, _remote, head = repository_with_bare_origin(tmp_path)
+    linked = tmp_path / "linked"
+    git(repository, "worktree", "add", "-b", "linked", str(linked), head)
+    before = git(repository, "remote", "get-url", "origin").stdout
+    service = mission_service(tmp_path, linked)
+    mission_id = service.create(
+        mission_contract(linked, head), "Protomentat", "repository:execute"
+    )
+    assert service.run(mission_id)["state"] == "awaiting_human"
+    assert git(repository, "remote", "get-url", "origin").stdout == before
+
+
+def test_ignored_paths_are_rejected_without_modifying_existing_bytes(
+    tmp_path: Path,
+) -> None:
+    repository, _head = git_repository(tmp_path)
+    (repository / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    git(repository, "add", ".gitignore")
+    git(repository, "commit", "-m", "ignore fixture")
+    head = git(repository, "rev-parse", "HEAD").stdout.strip()
+    path = repository / "ignored.txt"
+    path.write_text("before\n", encoding="utf-8")
+    patch = text_patch().replace("fixture.txt", "ignored.txt")
+    with pytest.raises(RepositoryMissionError, match="ignored"):
+        PatchGate(LocalGitRunner()).validate_and_apply(
+            repository, patch, ("ignored.txt",), head
+        )
+    assert path.read_text(encoding="utf-8") == "before\n"
+
+
+def test_git_patch_path_with_spaces_round_trips(tmp_path: Path) -> None:
+    repository, _head = git_repository(tmp_path)
+    git(repository, "mv", "fixture.txt", "a b.txt")
+    git(repository, "commit", "-m", "spaced fixture")
+    head = git(repository, "rev-parse", "HEAD").stdout.strip()
+    path = repository / "a b.txt"
+    path.write_text("after\n", encoding="utf-8")
+    patch = git(repository, "diff").stdout
+    git(repository, "restore", "--", "a b.txt")
+    evidence = PatchGate(LocalGitRunner()).validate_and_apply(
+        repository, patch, ("a b.txt",), head
+    )
+    assert evidence.changed_paths == ("a b.txt",)
+    assert path.read_text(encoding="utf-8") == "after\n"
+
+
+def test_workspace_equal_to_repository_is_rejected_before_copy(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    with pytest.raises(RepositoryMissionError, match="parent"):
+        RepositoryMissionContract.from_dict(
+            contract_data(repository, workspace_root=str(repository))
+        )
+
+
+def test_test_output_is_capped_before_process_completion(tmp_path: Path) -> None:
+    from erasmus.repository_missions import _run_bounded_test
+
+    result = _run_bounded_test(
+        (
+            sys.executable,
+            "-c",
+            "import sys,time;sys.stdout.write('x'*2000000);sys.stdout.flush();time.sleep(30)",
+        ),
+        tmp_path,
+        10,
+        limit=4096,
+    )
+    assert result.returncode == -1
+    assert "output limit exceeded" in result.stderr
+    assert len(result.stdout.encode("utf-8")) <= 4096
+
+
+def test_resumed_review_rejects_a_different_committed_head(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repository, _remote, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+    original = service._record_draft
+
+    def interrupt(*args):
+        raise RuntimeError("interrupted after review")
+
+    monkeypatch.setattr(service, "_record_draft", interrupt)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        service.run(mission_id)
+    assert service.inspect(mission_id)["state"] == "reviewed"
+    (repository / "fixture.txt").write_text("unreviewed\n", encoding="utf-8")
+    git(repository, "commit", "-am", "unreviewed change")
+    monkeypatch.setattr(service, "_record_draft", original)
+    with pytest.raises(RepositoryMissionError, match="reviewed repository changed"):
+        service.run(mission_id)
+    assert service.inspect(mission_id)["state"] == "blocked"
+
+
+def test_head_scope_review_denial_persists_blocked_state(tmp_path: Path) -> None:
+    repository, _remote, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    for rule in service.authority_rules:
+        if rule["operation"] == "independent_review":
+            rule["scope"] = str(repository.resolve())
+    mission_id = service.create(
+        mission_contract(repository, head), "Protomentat", "repository:execute"
+    )
+    with pytest.raises(RepositoryMissionError, match="authority policy denied"):
+        service.run(mission_id)
+    assert service.inspect(mission_id)["state"] == "blocked"
+
+
+def test_cli_rejects_worker_contract_before_persisting_mission(
+    tmp_path: Path, monkeypatch
+) -> None:
+    contract_path = tmp_path / "worker.json"
+    contract_path.write_text(json.dumps({"patch_source": "worker"}), encoding="utf-8")
+    database = tmp_path / "state.db"
+    rules = tmp_path / "rules.json"
+    rules.write_text(json.dumps({"rules": []}), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "erasmus",
+            "--db",
+            str(database),
+            "repository-mission-create",
+            "--contract",
+            str(contract_path),
+            "--actor",
+            "test",
+            "--authority-rules",
+            str(rules),
+        ],
+    )
+    with pytest.raises(ValueError, match="configured worker provider"):
+        main()
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT COUNT(*) FROM repository_missions").fetchone()[0] == 0
+
+
+def test_independent_clone_recreates_new_untracked_patch_files(tmp_path: Path) -> None:
+    repository, _remote, head = repository_with_bare_origin(tmp_path)
+    service = mission_service(tmp_path, repository)
+    patch = "diff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+added\n"
+    contract = RepositoryMissionContract.from_dict(
+        contract_data(
+            repository,
+            expected_base_sha=head,
+            allowed_paths=["new.txt"],
+            declared_patch=patch,
+            test_command=[
+                sys.executable,
+                "-c",
+                "from pathlib import Path; assert Path('new.txt').read_text() == 'added\\n'",
+            ],
+        )
+    )
+    mission_id = service.create(contract, "Protomentat", "repository:execute")
+    assert service.run(mission_id)["state"] == "awaiting_human"

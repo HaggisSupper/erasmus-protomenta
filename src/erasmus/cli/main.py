@@ -477,6 +477,8 @@ def main() -> None:
 
     elif args.cmd == "repository-mission-create":
         raw_contract = json.loads(Path(args.contract).read_text(encoding="utf-8"))
+        if raw_contract.get("patch_source") == "worker":
+            raise ValueError("CLI worker missions require a configured worker provider; use the controller service")
         service = RepositoryMissionService(
             store, authority_rules=_authority_rules(args.authority_rules)
         )

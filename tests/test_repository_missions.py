@@ -864,7 +864,7 @@ def test_evidence_is_deduplicated_across_recovery_boundaries(tmp_path: Path) -> 
     )
 
 
-def test_repository_mission_cli_create_run_and_inspect_emit_json(
+def test_repository_mission_cli_blocks_without_reviewer_and_inspects_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repository, _, head = repository_with_bare_origin(tmp_path)
@@ -910,9 +910,9 @@ def test_repository_mission_cli_create_run_and_inspect_emit_json(
             str(rules_path),
         ],
     )
-    main()
-    run = json.loads(capsys.readouterr().out)
-    assert run["state"] == "awaiting_human"
+    with pytest.raises(RepositoryMissionError, match="reviewer-produced evidence"):
+        main()
+    assert capsys.readouterr().out == ""
 
     monkeypatch.setattr(
         sys,
@@ -927,7 +927,8 @@ def test_repository_mission_cli_create_run_and_inspect_emit_json(
     )
     main()
     inspected = json.loads(capsys.readouterr().out)
-    assert inspected["draft_pr"]["head_sha"] == run["draft_pr"]["head_sha"]
+    assert inspected["state"] == "blocked"
+    assert inspected["draft_pr"] is None
 
 
 def test_repository_mission_cli_registers_no_merge_command(

@@ -131,3 +131,18 @@ See [`docs/runbook-windows.md`](docs/runbook-windows.md) for PowerShell verifica
 This repository is an implementable experimental kernel. It is personal-first but contract-shaped so it can later evolve into isolated dyadic deployments.
 
 See `docs/DEVELOPMENT_TRACK.md` for the locked phased architecture and scope boundaries.
+
+## Consolidated guarded repository missions
+
+Guarded repository missions, navigation, and code integrations are now additive
+to the current kernel. Migration 19 owns their tables; published migrations 17
+and 18 retain knowledge-policy and source-registry ownership. The explicit
+legacy migration converter recognizes the older branch-only mission migration
+17, preserves its data and timestamp, and applies the missing mainline schema.
+The current bounded advisory worker runner remains authoritative: worker output
+does not grant execution authority. Run `python -m pytest tests -q` for migration,
+authority, provenance, and repository-mission regression coverage.
+
+### Consolidated guarded missions
+
+Guarded repository missions are additive to the current bounded, advisory worker interface; worker responses retain `authorization: none`. Mainline migrations 17 and 18 keep their identity; mission tables use migration 19. Databases from the older mission branch are recognized and upgraded without losing their mission rows or recorded timestamps. Offline rollback removes only mission tables and migration 19. The mission schema is included in installed wheels.
